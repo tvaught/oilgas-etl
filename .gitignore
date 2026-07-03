@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff
+.ruff_cache/
+
+# Mypy
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Logs
+*.log
+
+# Data
+data/archive/
+data/processed/
+
+# Raw PDFs (keep directory, ignore contents)
+data/raw/**/*
+!data/raw/.gitkeep
+
+# Excel exports
+*.xlsx
+*.xls
+
+# Generated reports
+reports/*.csv
+reports/*.parquet
+reports/*.html
+reports/*.pdf

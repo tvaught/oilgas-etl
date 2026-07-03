@@ -1,0 +1,33 @@
+[[rule]]
+
+contains="COOLING"
+
+category="Utilities"
+
+[[rule]]
+
+contains="COMPRESS"
+
+category="Compression"
+
+[[rule]]
+
+contains="P&A"
+
+category="Plug and Abandonment"
+
+[[rule]]
+
+contains="WORKOVER"
+
+category="Workover"
+
+[revenue_types]
+
+WORKING_INTEREST = "REVENUE"
+TRANSPORTATION = "DEDUCTION"
+GATHERING = "DEDUCTION"
+COMPRESSION = "DEDUCTION"
+MARKETING = "DEDUCTION"
+TEXAS_SEVERANCE_TAX = "TAX"
+OKLAHOMA_SEVERANCE_TAX = "TAX"

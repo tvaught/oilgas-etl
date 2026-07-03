@@ -1,0 +1,7 @@
+database="data/oilgas.duckdb"
+
+raw_directory="data/raw"
+
+archive_directory="data/archive"
+
+default_operator="Highmark"
