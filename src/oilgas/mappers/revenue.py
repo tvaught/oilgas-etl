@@ -11,10 +11,14 @@ from oilgas.models.revenue import (
     RevenueProperty,
     RevenueStatement,
 )
-from oilgas.util.dates import (
-    parse_check_date,
-    parse_production_period,
+from oilgas.parsers.property import (
+    API_NUMBER,
+    COUNTY,
+    PROPERTY_CODE,
+    PROPERTY_NAME,
+    STATE,
 )
+from oilgas.util.dates import accounting_period, parse_check_date, parse_production_period
 from oilgas.util.numbers import parse_decimal, require_decimal
 
 
@@ -38,18 +42,26 @@ class RevenueMapper:
     ) -> RevenueLine:
 
         return RevenueLine(
-            revenue_type=row.fields["revenue_type"],
+            line_type=row.fields["line_type"].text,
+            revenue_type=row.fields["revenue_type"].text,
+            tax_deduct_code=row.get("tax_deduct_code"),
             production_period=parse_production_period(
-                row.fields["production_period"],
+                row.fields["production_period"].text,
             ),
-            volume=parse_decimal(
-                row.get("volume"),
+            property_volume=parse_decimal(
+                row.get("property_volume"),
             ),
             unit_price=parse_decimal(
                 row.get("unit_price"),
             ),
-            gross_value=parse_decimal(
-                row.get("gross_value"),
+            property_gross_value=parse_decimal(
+                row.get("property_gross_value"),
+            ),
+            property_deductions=parse_decimal(
+                row.get("property_deductions"),
+            ),
+            property_net_value=parse_decimal(
+                row.get("property_net_value"),
             ),
             owner_interest=parse_decimal(
                 row.get("owner_interest"),
@@ -60,10 +72,13 @@ class RevenueMapper:
             owner_volume=parse_decimal(
                 row.get("owner_volume"),
             ),
-            owner_value=require_decimal(
-                row.fields["owner_value"],
-                "owner_value",
+            owner_gross_value=parse_decimal(
+                row.get("owner_gross_value"),
             ),
+            owner_deductions=parse_decimal(
+                row.get("owner_deductions"),
+            ),
+            owner_net_value=require_decimal(row.get("owner_net_value"), "owner_net_value"),
         )
 
     #
@@ -75,12 +90,12 @@ class RevenueMapper:
     def product(
         self,
         block: DocumentBlock,
-        rows: list[ParsedRow],
+        lines: list[RevenueLine],
     ) -> RevenueProduct:
 
         return RevenueProduct(
-            name=block.metadata["product"],
-            lines=[self.line(r) for r in rows],
+            product=block.metadata["product"],
+            lines=lines,
         )
 
     #
@@ -96,11 +111,11 @@ class RevenueMapper:
     ) -> RevenueProperty:
 
         return RevenueProperty(
-            property_code=block.metadata["property_code"],
-            property_name=block.metadata["property_name"],
-            county=block.metadata["county"],
-            state=block.metadata["state"],
-            operator_api=block.metadata.get("operator_api"),
+            property_code=block.meta(PROPERTY_CODE),
+            property_name=block.meta(PROPERTY_NAME),
+            county=block.meta(COUNTY),
+            state=block.meta(STATE),
+            api_number=block.meta(API_NUMBER),
             products=products,
         )
 
@@ -126,5 +141,4 @@ class RevenueMapper:
             ),
             check_amount=header.check_amount,
             properties=properties,
-            source_file=source_file,
         )

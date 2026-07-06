@@ -8,37 +8,97 @@ from oilgas.config import settings
 
 
 class Database:
+    def __init__(
+        self,
+        path: Path | None = None,
+    ):
 
-    def __init__(self):
+        self.path = path or settings.database
 
-        self.path = settings.database
+        self.path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = duckdb.connect(
+            str(self.path),
+        )
 
-        self.conn = duckdb.connect(str(self.path))
+    # ----------------------------------------------------------
 
-    def initialize(self):
+    def initialize(self) -> None:
 
-        sql = settings.schema_sql.read_text()
+        sql_dir = Path(__file__).resolve().parents[2] / "sql"
 
-        self.conn.execute(sql)
+        #
+        # Execute numbered schema files first
+        #
+        for script in sorted(sql_dir.glob("[0-9][0-9][0-9]_*.sql")):
+            self.connection.execute(
+                script.read_text(),
+            )
 
-    def close(self):
+        #
+        # Views last (optional)
+        #
+        views = sql_dir / "views.sql"
 
-        self.conn.close()
+        if views.exists():
+            self.connection.execute(
+                views.read_text(),
+            )
 
-    def execute(self, sql: str, params=None):
+    # ----------------------------------------------------------
 
-        if params:
+    def close(self) -> None:
 
-            return self.conn.execute(sql, params)
+        self.connection.close()
 
-        return self.conn.execute(sql)
+    # ----------------------------------------------------------
 
-    def dataframe(self, sql: str):
+    def execute(
+        self,
+        sql: str,
+        params=None,
+    ):
 
-        return self.conn.execute(sql).fetchdf()
+        if params is None:
+            return self.connection.execute(sql)
 
-    def scalar(self, sql: str):
+        return self.connection.execute(
+            sql,
+            params,
+        )
 
-        return self.conn.execute(sql).fetchone()[0]
+    # ----------------------------------------------------------
+
+    def dataframe(
+        self,
+        sql: str,
+    ):
+
+        return self.connection.execute(sql).fetchdf()
+
+    # ----------------------------------------------------------
+
+    def scalar(
+        self,
+        sql: str,
+    ):
+
+        return self.connection.execute(sql).fetchone()[0]
+
+    # ----------------------------------------------------------
+
+    def __enter__(self):
+
+        return self
+
+    def __exit__(
+        self,
+        exc_type,
+        exc,
+        tb,
+    ):
+
+        self.close()

@@ -50,11 +50,31 @@ def parse_production_period(value: str) -> date:
     Returns the first day of the production month.
     """
 
-    dt = parser.parse(value)
+    month_map = {
+        "JAN": 1,
+        "FEB": 2,
+        "MAR": 3,
+        "APR": 4,
+        "MAY": 5,
+        "JUN": 6,
+        "JUL": 7,
+        "AUG": 8,
+        "SEP": 9,
+        "OCT": 10,
+        "NOV": 11,
+        "DEC": 12,
+    }
+
+    # Use 1980 as 2-digit year pivot from 1900's to 2000's
+    yr = value[4:]
+    if int(yr) <= 80:
+        yr = "20" + yr
+    else:
+        yr = "19" + yr
 
     return date(
-        dt.year,
-        dt.month,
+        int(yr),
+        month_map[value[:3].upper()],
         1,
     )
 

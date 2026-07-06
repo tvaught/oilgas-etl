@@ -3,16 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.progress import Progress
 
 from oilgas.classifier import DocumentClassifier
+from oilgas.config import settings
 from oilgas.database import Database
 from oilgas.debug import draw_layout
+from oilgas.document import DocumentBlock
 from oilgas.extractors.pdf import PDFExtractor
 from oilgas.layout import Layout
 from oilgas.parsers.header import HeaderExtractor
 from oilgas.parsers.product import ProductExtractor
 from oilgas.parsers.property import PropertyExtractor
+from oilgas.parsers.revenue import RevenueParser
 from oilgas.parsers.revenue_line import RevenueLineExtractor
+from oilgas.repositories.revenue import RevenueRepository
+
+console = Console()
 
 app = typer.Typer(
     help="Oil & Gas ETL",
@@ -24,6 +32,20 @@ app = typer.Typer(
 def main():
     """Oil & Gas ETL tools."""
     pass
+
+
+def property_blocks(
+    document,
+) -> list[DocumentBlock]:
+
+    blocks = []
+
+    for page in document.pages:
+        layout = Layout(page)
+
+        blocks.extend(PropertyExtractor(layout).extract())
+
+    return blocks
 
 
 @app.command("init")
@@ -108,7 +130,8 @@ def right_of(
 
     p = layout.find_phrase(phrase)
 
-    print("LABEL:", p.text)
+    if p:
+        print("LABEL:", p.text)
 
     print()
 
@@ -148,23 +171,19 @@ def header(pdf: Path):
 
 
 @app.command()
-def properties(pdf: Path):
+def properties(
+    pdf: Path,
+):
 
     document = PDFExtractor.load(pdf)
 
-    layout = Layout(document.pages[0])
-
-    extractor = PropertyExtractor(layout)
-
-    blocks = extractor.extract()
+    blocks = property_blocks(document)
 
     typer.echo(f"\nFound {len(blocks)} property blocks\n")
 
     for i, block in enumerate(blocks, start=1):
         typer.echo("=" * 80)
-
         typer.echo(f"PROPERTY {i}")
-
         typer.echo("=" * 80)
 
         typer.echo(block.header.text)
@@ -181,21 +200,21 @@ def products(pdf: Path):
 
     layout = Layout(document.pages[0])
 
-    properties = PropertyExtractor(layout).extract()
+    property_blocks = PropertyExtractor(layout).extract()
 
-    product_extractor = ProductExtractor()
-
-    for property_block in properties:
+    for property_block in property_blocks:
         print("=" * 80)
         print(property_block.header.text)
         print()
 
-        products = product_extractor.extract(property_block)
+        product_blocks = ProductExtractor(
+            property_block,
+        ).extract()
 
-        for product in products:
-            print(f"  PRODUCT: {product.metadata['product']}")
+        for product_block in product_blocks:
+            print(f"  PRODUCT: {product_block.metadata['product']}")
 
-            for row in product.rows:
+            for row in product_block.rows:
                 print(f"      {row.text}")
 
             print()
@@ -217,27 +236,92 @@ def lines(
 
     property_blocks = PropertyExtractor(layout).extract()
 
-    product_extractor = ProductExtractor()
-
-    line_extractor = RevenueLineExtractor(debug=debug)
-
     for property_block in property_blocks:
         print("=" * 80)
         print(property_block.header.text)
         print()
 
-        product_blocks = product_extractor.extract(property_block)
+        product_blocks = ProductExtractor(
+            property_block,
+        ).extract()
 
         for product_block in product_blocks:
             print(f"PRODUCT: {product_block.metadata['product']}")
             print()
 
-            parsed_rows = line_extractor.extract(product_block)
+            parsed_rows = RevenueLineExtractor(
+                product_block,
+                debug=debug,
+            ).extract()
 
             for parsed in parsed_rows:
                 for key, field in parsed.fields.items():
-                    print(f"{key:22} : {field.value:15} (x={field.x:.1f})")
+                    print(f"{key:22} : {field.text:15} (x={field.x:.1f})")
 
                 print("-" * 60)
 
             print()
+
+
+@app.command()
+def parse(
+    pdf: Path,
+) -> None:
+    """
+    Parse a revenue statement and emit the complete object graph as JSON.
+    """
+
+    document = PDFExtractor.load(pdf)
+
+    statement = RevenueParser().parse(
+        document=document,
+        source_file=pdf.name,
+    )
+
+    print(
+        statement.model_dump_json(
+            indent=2,
+        )
+    )
+
+
+@app.command()
+def ingest(
+    source: Path,
+    database: Path | None = None,
+) -> None:
+    """
+    Parse one or more revenue statements and persist them.
+    """
+
+    database_path = database or settings.database
+
+    if not source.exists():
+        raise typer.BadParameter(f"{source} does not exist.")
+
+    if source.is_dir():
+        files = sorted(source.glob("*.pdf"))
+    else:
+        files = [source]
+
+    console.print(f"[bold cyan]Importing {len(files)} PDF(s)...[/bold cyan]")
+
+    with Database(database_path) as db:
+        repo = RevenueRepository(db.connection)
+
+        with Progress() as progress:
+            task = progress.add_task(
+                "Importing revenue statements...",
+                total=len(files),
+            )
+
+            for file in files:
+                document = PDFExtractor.load(file)
+
+                statement = RevenueParser().parse(document, source)
+
+                repo.insert(file, statement)
+
+                progress.console.print(f"✓ {file.name}")
+
+                progress.advance(task)

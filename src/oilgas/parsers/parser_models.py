@@ -5,55 +5,46 @@ from dataclasses import dataclass, field
 
 @dataclass(slots=True)
 class ParsedField:
-    """
-    A single parsed table cell.
-
-    Keeps both the extracted text and the spatial location
-    that produced it.
-    """
-
-    value: str
-    column: str
+    text: str
     x: float
 
 
 @dataclass(slots=True)
 class ParsedRow:
-    """
-    One parsed table row.
-
-    Keys are logical column names.
-
-    Example:
-
-        {
-            "owner_value": ParsedField(...),
-            "gross_value": ParsedField(...),
-        }
-    """
-
     fields: dict[str, ParsedField] = field(default_factory=dict)
 
     def add(
         self,
         column: str,
-        value: str,
+        text: str,
         x: float,
     ) -> None:
 
         self.fields[column] = ParsedField(
-            value=value,
-            column=column,
+            text=text,
             x=x,
         )
 
-    def get(self, column: str) -> str | None:
+    def get(
+        self,
+        column: str,
+    ) -> str | None:
 
         field = self.fields.get(column)
 
-        return field.value if field else None
+        return field.text if field else None
 
-    def require(self, column: str) -> str:
+    def field(
+        self,
+        column: str,
+    ) -> ParsedField | None:
+
+        return self.fields.get(column)
+
+    def require(
+        self,
+        column: str,
+    ) -> str:
 
         value = self.get(column)
 
@@ -61,3 +52,14 @@ class ParsedRow:
             raise ValueError(f"Missing required column '{column}'")
 
         return value
+
+    def __contains__(
+        self,
+        column: str,
+    ) -> bool:
+
+        return column in self.fields
+
+    def items(self):
+
+        return self.fields.items()

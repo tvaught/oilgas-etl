@@ -15,12 +15,14 @@ class HeaderExtractor:
     of a revenue statement.
     """
 
+    def __init__(self, layout: Layout):
+        self.layout = layout
+
     def extract(
         self,
-        layout: Layout,
     ) -> RevenueHeader:
 
-        header_row = self._header_row(layout)
+        header_row = self._header_row()
         words = header_row.words
 
         check_index = next(i for i, word in enumerate(words) if word.text == "Check")
@@ -28,17 +30,17 @@ class HeaderExtractor:
 
         operator = " ".join(word.text for word in words[1:check_index])
 
-        check_number = layout.find_value(
+        check_number = self.layout.find_value(
             "Check Number",
             Direction.RIGHT,
         )
 
-        check_amount = layout.find_value(
+        check_amount = self.layout.find_value(
             "Check Amount",
             Direction.RIGHT,
         )
 
-        check_date = layout.find_value(
+        check_date = self.layout.find_value(
             "Check Date",
             Direction.RIGHT,
         )
@@ -50,10 +52,7 @@ class HeaderExtractor:
             check_date=require_check_date(
                 check_date,
             ),
-            check_amount=require_decimal(
-                check_amount,
-                "check_amount",
-            ),
+            check_amount=require_decimal(check_amount, "check_amount"),
         )
 
     #
@@ -64,12 +63,11 @@ class HeaderExtractor:
 
     def _value_for_label(
         self,
-        layout: Layout,
         label: str,
         direction: Direction,
     ) -> str:
 
-        value = layout.find_value(
+        value = self.layout.find_value(
             label,
             direction,
         )
@@ -81,10 +79,9 @@ class HeaderExtractor:
 
     def _header_row(
         self,
-        layout: Layout,
     ) -> LayoutRow:
 
-        header_row = layout.row_for_phrase("Check Number")
+        header_row = self.layout.row_for_phrase("Check Number")
 
         if header_row is None:
             raise ValueError("Check Number not found.")
@@ -96,14 +93,13 @@ class HeaderExtractor:
         layout: Layout,
     ) -> str:
 
-        return self._header_row(layout).words[0].text
+        return self._header_row(self.layout).words[0].text
 
     def _find_operator(
         self,
-        layout: Layout,
     ) -> str:
 
-        row = self._header_row(layout)
+        row = self._header_row(self.layout)
 
         words = row.words
 
@@ -113,7 +109,6 @@ class HeaderExtractor:
 
     def _find_production_month(
         self,
-        layout: Layout,
     ) -> str:
 
         #
@@ -123,7 +118,7 @@ class HeaderExtractor:
         # return the month immediately following it.
         #
 
-        for row in layout.rows:
+        for row in self.layout.rows:
             if row.text.startswith("WORKING INTEREST"):
                 words = row.words
 

@@ -16,9 +16,14 @@ class ProductExtractor:
         list[DocumentBlock(type=PRODUCT)]
     """
 
-    def extract(
+    def __init__(
         self,
         property_block: DocumentBlock,
+    ):
+        self.property_block = property_block
+
+    def extract(
+        self,
     ) -> list[DocumentBlock]:
 
         blocks: list[DocumentBlock] = []
@@ -32,7 +37,7 @@ class ProductExtractor:
         #
         # Skip the property header.
         #
-        for row in property_block.rows[1:]:
+        for row in self.property_block.rows[1:]:
             text = row.text.strip()
 
             #

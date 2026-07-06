@@ -17,71 +17,79 @@ from oilgas.parsers.revenue_line import RevenueLineExtractor
 class RevenueParser:
     def __init__(self):
 
-        self.header_extractor = HeaderExtractor()
-
-        self.property_extractor = PropertyExtractor()
-
-        self.product_extractor = ProductExtractor()
-
-        self.line_extractor = RevenueLineExtractor()
-
         self.mapper = RevenueMapper()
 
     def parse(
         self,
         document: PDFDocument,
+        source_file: str,
     ) -> RevenueStatement:
 
         #
         # Revenue statements are currently one page.
         #
-        page = document.pages[0]
-
-        layout = Layout(page)
+        page1 = document.pages[0]
 
         #
         # Header
         #
-        header = self.header_extractor.extract(layout)
+        header = None
 
-        #
-        # Property blocks
-        #
-        property_blocks = self.property_extractor.extract(layout)
+        for page in document.pages:
+            layout = Layout(page)
+
+            if layout.find_phrase("Check Number") is None:
+                continue
+
+            header = HeaderExtractor(layout).extract()
+            break
+
+        if header is None:
+            raise ValueError("Could not locate statement header.")
 
         properties: list[RevenueProperty] = []
 
         #
-        # Walk properties
+        # Property blocks
         #
-        for property_block in property_blocks:
-            product_blocks = self.product_extractor.extract(
-                property_block,
-            )
+        for page in document.pages:
+            layout = Layout(page)
 
-            products: list[RevenueProduct] = []
+            property_blocks = PropertyExtractor(layout).extract()
+            print(f"{len(property_blocks)=}")
+            #
+            # Walk properties
+            #
+            if not property_blocks:
+                continue
 
-            #
-            # Walk products
-            #
-            for product_block in product_blocks:
-                parsed_rows = self.line_extractor.extract(
-                    product_block,
+            for property_block in property_blocks:
+                print(property_block.metadata["property_name"])
+                product_blocks = ProductExtractor(property_block).extract()
+
+                products: list[RevenueProduct] = []
+                print(f"{len(product_blocks)=}")
+                #
+                # Walk products
+                #
+                for product_block in product_blocks:
+                    parsed_rows = RevenueLineExtractor(product_block).extract()
+
+                    lines = [self.mapper.line(row) for row in parsed_rows]
+
+                    product = self.mapper.product(
+                        product_block,
+                        lines,
+                    )
+
+                    products.append(product)
+
+                property_model = self.mapper.property(
+                    property_block,
+                    products,
                 )
 
-                product = self.mapper.product(
-                    product_block,
-                    parsed_rows,
-                )
-
-                products.append(product)
-
-            property_model = self.mapper.property(
-                property_block,
-                products,
-            )
-
-            properties.append(property_model)
+                properties.append(property_model)
 
         #
         # Build statement
