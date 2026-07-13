@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from oilgas.models.revenue import RevenueProperty, RevenueStatement
+from oilgas.models.revenue import RevenueLine, RevenueProduct, RevenueProperty, RevenueStatement
 from oilgas.util.hashing import sha256
 from oilgas.util.ids import new_uuid
 
@@ -11,16 +11,49 @@ from .base import Repository
 
 
 class RevenueRepository(Repository):
+    def __init__(
+        self,
+        connection,
+        debug: bool = False,
+    ):
+        super().__init__(connection)
+        self.debug = debug
+
+    def is_imported(
+        self,
+        pdf: Path,
+    ) -> bool:
+        digest = sha256(pdf)
+
+        row = self.execute(
+            """
+            SELECT 1
+            FROM source_file sf
+            JOIN revenue_statement rs
+                ON rs.source_file_id = sf.source_file_id
+            WHERE sf.sha256 = ?
+            LIMIT 1
+            """,
+            (digest,),
+        ).fetchone()
+
+        return row is not None
+
     def insert(
         self,
         pdf: Path,
         statement: RevenueStatement,
-    ) -> None:
+    ) -> bool:
 
         self.connection.begin()
 
         try:
             source_file_id = self._insert_source_file(pdf)
+
+            if self._has_revenue_statement(source_file_id):
+                self._debug(f"Skipping already imported revenue statement: {pdf}")
+                self.connection.commit()
+                return False
 
             operator_id = self._upsert_operator(statement.operator)
             statement_id = self._insert_statement(
@@ -29,10 +62,8 @@ class RevenueRepository(Repository):
                 statement,
             )
 
-            self.connection.commit()
-
             for property_ in statement.properties:
-                print(f"attempting to upsert {property_.property_name}, {property_.county}")
+                self._debug(f"attempting to upsert {property_.property_name}, {property_.county}")
                 property_id = self._upsert_property(operator_id, property_)
 
                 for display_order, product in enumerate(property_.products, start=1):
@@ -44,7 +75,7 @@ class RevenueRepository(Repository):
                     )
 
                     for line in product.lines:
-                        print(line.model_dump())
+                        self._debug(line.model_dump())
                         self._insert_line(
                             statement_id,
                             property_id,
@@ -52,9 +83,9 @@ class RevenueRepository(Repository):
                             line,
                         )
             self.connection.commit()
+            return True
 
         except Exception:
-            print(f"Exception: {Exception}")
             self.connection.rollback()
 
             raise
@@ -112,6 +143,22 @@ class RevenueRepository(Repository):
         )
 
         return source_file_id
+
+    def _has_revenue_statement(
+        self,
+        source_file_id: UUID,
+    ) -> bool:
+        row = self.execute(
+            """
+            SELECT 1
+            FROM revenue_statement
+            WHERE source_file_id = ?
+            LIMIT 1
+            """,
+            (source_file_id,),
+        ).fetchone()
+
+        return row is not None
 
     def _upsert_operator(
         self,
@@ -314,6 +361,7 @@ class RevenueRepository(Repository):
                 property_id,
                 product_id,
 
+                line_type,
                 revenue_type,
 
                 tax_deduct_code,
@@ -336,14 +384,16 @@ class RevenueRepository(Repository):
 
             )
 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 line_id,
                 statement_id,
                 property_id,
                 product_id,
+                line.line_type,
                 line.revenue_type,
+                line.tax_deduct_code,
                 line.production_period,
                 line.property_volume,
                 line.unit_price,
@@ -360,3 +410,10 @@ class RevenueRepository(Repository):
         )
 
         return line_id
+
+    def _debug(
+        self,
+        message: object,
+    ) -> None:
+        if self.debug:
+            print(message)

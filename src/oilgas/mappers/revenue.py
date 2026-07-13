@@ -4,13 +4,13 @@ from uuid import UUID
 
 from oilgas.document import DocumentBlock
 from oilgas.models.header import RevenueHeader
-from oilgas.models.parser import ParsedRow
 from oilgas.models.revenue import (
     RevenueLine,
     RevenueProduct,
     RevenueProperty,
     RevenueStatement,
 )
+from oilgas.parsers.parser_models import ParsedRow
 from oilgas.parsers.property import (
     API_NUMBER,
     COUNTY,
@@ -18,7 +18,7 @@ from oilgas.parsers.property import (
     PROPERTY_NAME,
     STATE,
 )
-from oilgas.util.dates import accounting_period, parse_check_date, parse_production_period
+from oilgas.util.dates import parse_production_period
 from oilgas.util.numbers import parse_decimal, require_decimal
 
 
@@ -136,9 +136,6 @@ class RevenueMapper:
             owner_number=header.owner_number,
             check_number=header.check_number,
             check_date=header.check_date,
-            accounting_period=accounting_period(
-                header.check_date,
-            ),
             check_amount=header.check_amount,
             properties=properties,
         )

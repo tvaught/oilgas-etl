@@ -32,7 +32,7 @@ class RevenueLine(BaseModel):
 
     @property
     def is_deduction(self) -> bool:
-        return self.owner_value < 0
+        return self.owner_net_value < 0
 
 
 class RevenueProduct(BaseModel):
@@ -47,7 +47,7 @@ class RevenueProduct(BaseModel):
     @property
     def total_owner_value(self) -> Decimal:
         return sum(
-            (line.owner_value for line in self.lines),
+            (line.owner_net_value for line in self.lines),
             start=Decimal("0.00"),
         )
 
@@ -81,7 +81,6 @@ class RevenueStatement(BaseModel):
     check_date: date
     check_amount: Decimal
     properties: list[RevenueProperty] = Field(default_factory=list)
-    accounting_period: date | None = None
 
     @property
     def accounting_period(self) -> date:
@@ -89,12 +88,10 @@ class RevenueStatement(BaseModel):
 
     @property
     def total_owner_value(self) -> Decimal:
-        """
         return sum(
             (prop.total_owner_value for prop in self.properties),
             start=Decimal("0.00"),
-        )"""
-        pass
+        )
 
     @model_validator(mode="after")
     def validate_totals(self):

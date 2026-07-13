@@ -1,9 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
 from oilgas.extractors.models import PDFDocument
 
 
-class DocumentType(str, Enum):
+class DocumentType(StrEnum):
     UNKNOWN = "UNKNOWN"
 
     HIGHMARK_REVENUE = "HIGHMARK_REVENUE"
@@ -20,16 +20,15 @@ RULES = {
         "CHECK NUMBER",
         "CHECK DATE",
     ],
-
     DocumentType.HIGHMARK_JIB: [
-        "HIGHMARK ENERGY OPERATING LLC",
-        "JOINT INTEREST",
+        "HIGHMARK ENERGY OPERATING",
+        "OPERATOR INVOICE - JIB",
+        "INVOICE NUMBER",
+        "OP ACCOUNTING MONTH",
     ],
-
     DocumentType.HIGHMARK_STATEMENT: [
         "STATEMENT OF ACCOUNT",
     ],
-
     DocumentType.XTO_REVENUE: [
         "XTO ENERGY",
         "REVENUE",
@@ -38,11 +37,10 @@ RULES = {
 
 
 class DocumentClassifier:
-
     @staticmethod
     def classify(document: PDFDocument) -> DocumentType:
 
-        text = document.pages[0].text.upper()
+        text = "\n".join(page.text for page in document.pages).upper()
 
         for doc_type, required in RULES.items():
             if all(token in text for token in required):

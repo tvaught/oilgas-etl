@@ -4,6 +4,13 @@ from oilgas.document import BlockType, DocumentBlock
 
 PRODUCT_TOTAL_PREFIX = "Total "
 
+KNOWN_PRODUCT_HEADINGS = {
+    "GAS SALES",
+    "JOINT INTEREST BILLING",
+    "NATURAL GAS LIQUIDS",
+    "OIL",
+}
+
 
 class ProductExtractor:
     """
@@ -92,14 +99,7 @@ class ProductExtractor:
             #
             # Detect a new product.
             #
-            if (
-                current_product is None
-                and text.isupper()
-                and "INTEREST" not in text
-                and "TRANSPORTATION" not in text
-                and "SEVERANCE" not in text
-                and "WORKING" not in text
-            ):
+            if current_product is None and self._is_product_heading(text):
                 current_product = text
                 start_row = row.index
                 current_rows = [row]
@@ -112,3 +112,18 @@ class ProductExtractor:
                 current_rows.append(row)
 
         return blocks
+
+    def _is_product_heading(
+        self,
+        text: str,
+    ) -> bool:
+        if text in KNOWN_PRODUCT_HEADINGS:
+            return True
+
+        return (
+            text.isupper()
+            and "INTEREST" not in text
+            and "TRANSPORTATION" not in text
+            and "SEVERANCE" not in text
+            and "WORKING" not in text
+        )

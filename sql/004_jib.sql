@@ -9,8 +9,10 @@ CREATE TABLE jib_invoice (
     source_file_id UUID NOT NULL
         REFERENCES source_file(source_file_id),
 
-    operator_id UUID
+    operator_id UUID NOT NULL
         REFERENCES operator(operator_id),
+
+    owner_number TEXT,
 
     invoice_number TEXT NOT NULL,
 
@@ -24,7 +26,56 @@ CREATE TABLE jib_invoice (
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (
+        operator_id,
+        invoice_number
+    )
+);
+
+CREATE TABLE jib_cost_center (
+
+    cost_center_id UUID PRIMARY KEY,
+
+    operator_id UUID NOT NULL
+        REFERENCES operator(operator_id),
+
+    cost_center_code TEXT NOT NULL,
+
+    cost_center_name TEXT,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (
+        operator_id,
+        cost_center_code
+    )
+);
+
+CREATE TABLE jib_cost_center_summary (
+
+    summary_id UUID PRIMARY KEY,
+
+    invoice_id UUID NOT NULL
+        REFERENCES jib_invoice(invoice_id),
+
+    cost_center_id UUID NOT NULL
+        REFERENCES jib_cost_center(cost_center_id),
+
+    afe TEXT,
+
+    description TEXT,
+
+    gross_amount DECIMAL(18,2),
+
+    cash_call_amount DECIMAL(18,2),
+
+    invoiced_amount DECIMAL(18,2),
+
+    display_order INTEGER NOT NULL
 );
 
 CREATE TABLE jib_line (
@@ -34,21 +85,17 @@ CREATE TABLE jib_line (
     invoice_id UUID NOT NULL
         REFERENCES jib_invoice(invoice_id),
 
+    cost_center_id UUID NOT NULL
+        REFERENCES jib_cost_center(cost_center_id),
+
     vendor_id UUID
         REFERENCES vendor(vendor_id),
 
-    cost_center_id UUID
-        REFERENCES cost_center(cost_center_id),
-
-    category_id UUID
-        REFERENCES expense_category(category_id),
-
-    property_id UUID
-        REFERENCES property(property_id),
-
-    activity_period DATE,
-
     afe TEXT,
+
+    cost_class TEXT,
+
+    account_group TEXT,
 
     op_account TEXT,
 
@@ -56,9 +103,15 @@ CREATE TABLE jib_line (
 
     description TEXT,
 
+    vendor_invoice TEXT,
+
+    activity_period DATE,
+
+    partner_percent DECIMAL(18,10),
+
     gross_amount DECIMAL(18,2),
 
-    working_interest DECIMAL(18,10),
+    invoiced_amount DECIMAL(18,2),
 
-    net_amount DECIMAL(18,2)
+    display_order INTEGER NOT NULL
 );

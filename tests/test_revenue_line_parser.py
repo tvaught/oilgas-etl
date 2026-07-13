@@ -92,6 +92,17 @@ def test_bare_trn_is_continuation() -> None:
     assert parser._is_continuation(record) is True
 
 
+def test_bare_gat_is_continuation() -> None:
+    parser = extractor()
+    record = parsed_row("GAT", owner_volume="0.01")
+
+    parser._normalize_owner_net_value(record)
+
+    assert record.get(OWNER_VOLUME) is None
+    assert record.get(OWNER_NET_VALUE) == "0.01"
+    assert parser._is_continuation(record) is True
+
+
 def test_merge_into_previous_adds_owner_net_value() -> None:
     parser = extractor()
     previous = parsed_row("WI SEV", owner_net_value="304.18")
@@ -102,12 +113,22 @@ def test_merge_into_previous_adds_owner_net_value() -> None:
     assert parse_decimal(previous.get(OWNER_NET_VALUE)) == Decimal("288.39")
 
 
-def test_merge_into_previous_rejects_non_sev_previous() -> None:
+def test_merge_into_previous_allows_mis_base_row() -> None:
+    parser = extractor()
+    previous = parsed_row("WI MIS", owner_net_value="0.10")
+    continuation = parsed_row("TRN", owner_net_value="(0.08)")
+
+    parser._merge_into_previous(previous, continuation)
+
+    assert parse_decimal(previous.get(OWNER_NET_VALUE)) == Decimal("0.02")
+
+
+def test_merge_into_previous_rejects_unrelated_previous() -> None:
     parser = extractor()
     previous = parsed_row("WI TRN", owner_net_value="0.02")
     continuation = parsed_row("TRN", owner_net_value="(15.79)")
 
-    with pytest.raises(ValueError, match="previous SEV"):
+    with pytest.raises(ValueError, match="previous SEV or MIS"):
         parser._merge_into_previous(previous, continuation)
 
 

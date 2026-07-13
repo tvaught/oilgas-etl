@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from oilgas.document import DocumentBlock
 from oilgas.layout import LayoutRow
 from oilgas.parsers.parser_models import ParsedField, ParsedRow
+from oilgas.util.numbers import parse_decimal
 
 MONTHS = {
     "JAN",
@@ -28,7 +28,7 @@ LINE_TYPE = "line_type"
 REVENUE_TYPE = "revenue_type"
 TAX_DEDUCT_CODE = "tax_deduct_code"
 PRODUCTION_PERIOD = "production_period"
-VOLUME = "volume"
+PROPERTY_VOLUME = "property_volume"
 UNIT_PRICE = "unit_price"
 
 PROPERTY_GROSS_VALUE = "property_gross_value"
@@ -66,25 +66,25 @@ class Column:
 
 
 DEFAULT_COLUMNS = [
-    Column("revenue_type", 60),
-    Column("production_period", 160),
-    Column("volume", 422),
-    Column("unit_price", 476),
-    Column("property_net_value", 531),
-    Column("owner_interest", 586),
-    Column("distribution_interest", 636),
-    Column("owner_volume", 701),
-    Column("owner_net_value", 756),
+    Column(REVENUE_TYPE, 60),
+    Column(PRODUCTION_PERIOD, 160),
+    Column(PROPERTY_VOLUME, 422),
+    Column(UNIT_PRICE, 476),
+    Column(PROPERTY_NET_VALUE, 531),
+    Column(OWNER_INTEREST, 586),
+    Column(DISTRIBUTION_INTEREST, 636),
+    Column(OWNER_VOLUME, 701),
+    Column(OWNER_NET_VALUE, 756),
 ]
 
 NUMERIC_COLUMNS = [
-    Column("volume", 422),
-    Column("unit_price", 476),
-    Column("property_net_value", 531),
-    Column("owner_interest", 586),
-    Column("distribution_interest", 636),
-    Column("owner_volume", 701),
-    Column("owner_net_value", 756),
+    Column(PROPERTY_VOLUME, 422),
+    Column(UNIT_PRICE, 476),
+    Column(PROPERTY_NET_VALUE, 531),
+    Column(OWNER_INTEREST, 586),
+    Column(DISTRIBUTION_INTEREST, 636),
+    Column(OWNER_VOLUME, 701),
+    Column(OWNER_NET_VALUE, 756),
 ]
 
 
@@ -156,7 +156,18 @@ class RevenueLineExtractor:
             if not self._is_detail_row(layout_row):
                 continue
 
-            rows.append(self._parse_row(layout_row))
+            parsed = self._parse_row(layout_row)
+
+            if self._is_continuation(parsed):
+                if not rows:
+                    raise ValueError("Continuation row encountered before any base transaction.")
+
+                self._merge_into_previous(
+                    rows[-1],
+                    parsed,
+                )
+            else:
+                rows.append(parsed)
 
         return rows
 
@@ -306,10 +317,6 @@ class RevenueLineExtractor:
         if tokens[0].text == "DEDUCT" or tokens[0].text.startswith("DEDUCT "):
             return self._parse_chevron_deduct(tokens)
 
-        print("\nTOKENS")
-        for t in tokens:
-            print(f"{t.text:20} {t.x:.1f}")
-
         if self.debug:
             self._debug_tokens(tokens)
         #
@@ -338,17 +345,6 @@ class RevenueLineExtractor:
             tokens[1].x,
         )
 
-        if (
-            parsed.get(REVENUE_TYPE) in {"TRN", "MIS", "DEDUCT"}
-            and parsed.get(OWNER_NET_VALUE) is None
-            and parsed.get(OWNER_VOLUME) is not None
-        ):
-            field = parsed.fields.pop(OWNER_VOLUME)
-            parsed.add(
-                OWNER_NET_VALUE,
-                field.text,
-                field.x,
-            )
         #
         # Remaining tokens map by x coordinate.
         #
@@ -365,12 +361,109 @@ class RevenueLineExtractor:
                 token.text,
                 token.x,
             )
-        print("\nFIELDS")
-        # for name, field in parsed.fields.items():
-        #    print(f"{name:24} -> {field.text}")
 
-        print(parsed.fields.keys())
+        self._normalize_owner_net_value(parsed)
+
+        if self.debug:
+            self._debug_fields(parsed)
+
         return parsed
+
+    def _debug_fields(
+        self,
+        parsed: ParsedRow,
+    ) -> None:
+        print()
+        print("FIELDS")
+        print("-" * 72)
+
+        for name, field in parsed.fields.items():
+            print(f"{name:24} : {field.text:15} (x={field.x:.1f})")
+
+        print("-" * 72)
+
+    def _normalize_owner_net_value(
+        self,
+        parsed: ParsedRow,
+    ) -> None:
+        """
+        Some XTO/Chevron-style TRN, MIS, TRT, GAT, and DEDUCT rows contain only an
+        owner-level amount. Its x-coordinate can fall closer to owner_volume
+        than owner_net_value, so normalize it after all numeric tokens have
+        been assigned.
+        """
+
+        revenue_type = parsed.get(REVENUE_TYPE)
+
+        if revenue_type not in {"TRN", "MIS", "TRT", "GAT", "DEDUCT"}:
+            return
+
+        if parsed.get(OWNER_NET_VALUE) is not None:
+            return
+
+        owner_volume = parsed.field(OWNER_VOLUME)
+
+        if owner_volume is None:
+            return
+
+        if parse_decimal(owner_volume.text) is None:
+            return
+
+        parsed.fields.pop(OWNER_VOLUME)
+        parsed.add(
+            OWNER_NET_VALUE,
+            owner_volume.text,
+            owner_volume.x,
+        )
+
+    def _is_continuation(
+        self,
+        record: ParsedRow,
+    ) -> bool:
+        line_type = record.get(LINE_TYPE)
+        revenue_type = record.get(REVENUE_TYPE)
+        interest_type = record.get("interest_type")
+
+        transaction_type = line_type or revenue_type
+
+        return (
+            transaction_type in {"TRN", "MIS", "TRT", "GAT"}
+            and interest_type is None
+            and record.get(OWNER_NET_VALUE) is not None
+        )
+
+    def _merge_into_previous(
+        self,
+        previous: ParsedRow,
+        continuation: ParsedRow,
+    ) -> None:
+        previous_type = previous.get(LINE_TYPE) or previous.get(REVENUE_TYPE)
+
+        previous_code = (previous_type or "").split()[-1]
+
+        if previous_code not in {"SEV", "MIS"}:
+            raise ValueError(
+                "Continuation row can only be merged into previous SEV or MIS row. "
+                f"Previous row type was {previous_type!r}."
+            )
+
+        previous_value = parse_decimal(previous.get(OWNER_NET_VALUE))
+        continuation_value = parse_decimal(continuation.get(OWNER_NET_VALUE))
+
+        if previous_value is None:
+            raise ValueError("Previous SEV row is missing owner_net_value.")
+
+        if continuation_value is None:
+            raise ValueError("Continuation row is missing owner_net_value.")
+
+        field = previous.field(OWNER_NET_VALUE)
+        x = field.x if field is not None else 0
+
+        previous.add(
+            OWNER_NET_VALUE,
+            str(previous_value + continuation_value),
+            x,
+        )
 
     def find_period(tokens: list[str]) -> int:
 
@@ -390,6 +483,12 @@ class RevenueLineExtractor:
     ) -> ParsedRow:
 
         parsed = ParsedRow()
+
+        parsed.add(
+            LINE_TYPE,
+            "DEDUCT",
+            tokens[0].x,
+        )
 
         parsed.add(
             REVENUE_TYPE,
