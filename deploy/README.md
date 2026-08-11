@@ -76,6 +76,14 @@ cd /srv/oilgas/app
 ```
 
 The script fast-forwards the checkout, installs the lockfile-pinned dependencies,
-repairs group read/execute permissions, restarts `oilgas`, and prints service status
-and the last 100 service-log lines. It must be run as the deployment user (`travis`),
-which has passwordless or interactive `sudo` access for the required commands.
+repairs group read/execute permissions, restarts `oilgas`, and confirms the service
+is active. It prints each command before running it. To additionally print the
+systemd status and the last 100 service-log lines, use:
+
+```bash
+./deploy/update.sh --verbose
+# or: ./deploy/update.sh -v
+```
+
+It must be run as the deployment user (`travis`), which has passwordless or
+interactive `sudo` access for the required commands.

@@ -4,16 +4,60 @@
 
 set -euo pipefail
 
+verbose=false
+
+usage() {
+    cat <<'EOF'
+Usage: ./deploy/update.sh [--verbose|-v]
+
+Update the application checkout, sync locked dependencies, repair service
+permissions, and restart the oilgas service.
+
+Options:
+  -v, --verbose  Print systemd status and the latest 100 service-log lines.
+  -h, --help     Show this help text.
+EOF
+}
+
+run() {
+    printf '+ '
+    printf '%q ' "$@"
+    printf '\n'
+    "$@"
+}
+
+while (( $# > 0 )); do
+    case "$1" in
+        -v|--verbose)
+            verbose=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'Unknown option: %s\n\n' "$1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
 app_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+printf 'Updating Oil & Gas ETL in %s\n' "$app_dir"
 cd "$app_dir"
 
-git pull --ff-only
-uv sync --frozen
+run git pull --ff-only
+run uv sync --frozen
+run sudo chown -R travis:oilgas "$app_dir"
+run sudo chmod -R g+rX "$app_dir"
+run sudo systemctl restart oilgas
+run sudo systemctl is-active --quiet oilgas
+printf 'oilgas service is active.\n'
 
-sudo chown -R travis:oilgas "$app_dir"
-sudo chmod -R g+rX "$app_dir"
-
-sudo systemctl restart oilgas
-sudo systemctl status oilgas --no-pager
-sudo journalctl -u oilgas -n 100 --no-pager
+if "$verbose"; then
+    run sudo systemctl status oilgas --no-pager
+    run sudo journalctl -u oilgas -n 100 --no-pager
+fi
