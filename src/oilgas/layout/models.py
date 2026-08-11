@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
+
+from oilgas.extractors.models import PDFWord
 
 
-class Direction(str, Enum):
+class Direction(StrEnum):
     LEFT = "left"
     RIGHT = "right"
     UP = "up"

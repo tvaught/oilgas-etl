@@ -192,8 +192,7 @@ def header(pdf: Path):
 
     layout = Layout(document.pages[0])
 
-    extractor = HeaderExtractor()
-    header = extractor.extract(layout)
+    header = HeaderExtractor(layout).extract()
 
     print(f"Owner Number : {header.owner_number}")
     print(f"Operator     : {header.operator}")

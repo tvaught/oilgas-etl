@@ -70,7 +70,7 @@ class ProductExtractor:
                         )
                     )
 
-                break
+                return blocks
 
             #
             # Product totals terminate the current product.
@@ -110,6 +110,17 @@ class ProductExtractor:
             #
             if current_product is not None:
                 current_rows.append(row)
+
+        if current_product is not None:
+            blocks.append(
+                DocumentBlock(
+                    type=BlockType.PRODUCT,
+                    start_row=start_row,
+                    end_row=current_rows[-1].index,
+                    rows=current_rows,
+                    metadata={"product": current_product},
+                )
+            )
 
         return blocks
 

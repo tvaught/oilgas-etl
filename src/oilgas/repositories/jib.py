@@ -39,14 +39,15 @@ class JIBRepository(Repository):
         self.connection.begin()
 
         try:
-            source_file_id = self._insert_source_file(pdf)
-            operator_id = self._upsert_operator(canonical_operator_name(invoice.operator))
-
-            if self._has_invoice(operator_id, invoice.invoice_number):
+            operator_name = canonical_operator_name(invoice.operator)
+            operator_id = self._operator_id(operator_name)
+            if operator_id is not None and self._has_invoice(operator_id, invoice.invoice_number):
                 self._debug(f"Skipping already imported JIB invoice: {invoice.invoice_number}")
                 self.connection.commit()
                 return False
 
+            source_file_id = self._insert_source_file(pdf)
+            operator_id = operator_id or self._upsert_operator(operator_name)
             invoice_id = self._insert_invoice(
                 source_file_id,
                 operator_id,

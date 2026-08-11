@@ -34,3 +34,16 @@ def test_protected_app_redirects_unauthenticated_requests(tmp_path, monkeypatch)
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/login")
+
+
+def test_google_callback_is_safe_when_authentication_is_disabled(tmp_path, monkeypatch) -> None:
+    database_path = Path(tmp_path) / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    database.close()
+    monkeypatch.setenv("OILGAS_AUTH_REQUIRED", "false")
+
+    response = create_app(database_path).test_client().get("/auth/google/callback")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")

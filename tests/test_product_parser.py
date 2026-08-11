@@ -1,3 +1,4 @@
+
 from oilgas.document import BlockType, DocumentBlock
 from oilgas.extractors.models import PDFWord
 from oilgas.layout.rows import LayoutRow
@@ -52,3 +53,23 @@ def test_joint_interest_billing_is_product_heading() -> None:
     assert len(product_blocks) == 1
     assert product_blocks[0].metadata["product"] == "JOINT INTEREST BILLING"
     assert "WORKING INTEREST May 26" in product_blocks[0].text
+
+
+def test_final_product_without_a_recognized_total_is_preserved() -> None:
+    property_block = DocumentBlock(
+        type=BlockType.PROPERTY,
+        start_row=0,
+        end_row=3,
+        rows=[
+            row(0, "Property: P-1 TEST WELL, State: TX, County: TEST"),
+            row(1, "OIL"),
+            row(2, "WORKING INTEREST May 26 1.00 70.00 1.00000000 70.00"),
+            row(3, "Total Property 70.00"),
+        ],
+    )
+
+    product_blocks = ProductExtractor(property_block).extract()
+
+    assert len(product_blocks) == 1
+    assert product_blocks[0].metadata["product"] == "OIL"
+    assert product_blocks[0].end_row == 2

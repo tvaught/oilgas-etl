@@ -208,7 +208,8 @@ class RevenueRepository(Repository):
         Return the property's UUID.
 
         Properties are uniquely identified by property_code.
-        Existing metadata is refreshed on every import.
+        The first imported metadata is retained because existing properties may
+        already be referenced by financial rows.
         """
 
         row = self.execute(

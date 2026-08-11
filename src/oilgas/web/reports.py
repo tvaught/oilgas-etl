@@ -119,8 +119,9 @@ class ReportRepository:
         jib_where, jib_params = self._jib_filters(filters, jib_date)
         # The revenue and JIB branches are independent. A filter for one branch
         # suppresses unfiltered rows from the other; selecting both keeps both.
-        revenue_select = "" if not filters.cost_centers or filters.properties else "AND FALSE"
-        jib_select = "" if not filters.properties or filters.cost_centers else "AND FALSE"
+        revenue_filter_selected = bool(filters.properties or filters.products)
+        revenue_select = "" if not filters.cost_centers or revenue_filter_selected else "AND FALSE"
+        jib_select = "" if not revenue_filter_selected or filters.cost_centers else "AND FALSE"
         sql = f"""
             SELECT
                 date_trunc('month', {revenue_date})::DATE AS report_month,

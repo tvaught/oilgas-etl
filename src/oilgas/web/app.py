@@ -77,6 +77,8 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.get("/auth/google/callback")
     def google_callback():
+        if not auth.required:
+            return redirect(url_for("index"))
         assert google is not None
         token = google.authorize_access_token()
         userinfo = token.get("userinfo") or google.get("userinfo").json()
@@ -131,7 +133,7 @@ def create_app(database_path: Path | None = None) -> Flask:
             if row["record_type"] == "revenue":
                 query["property"] = [str(row["property_name"])]
                 return f"/audit/revenue?{urlencode(query, doseq=True)}"
-            query["cost_center"] = [str(row["cost_center_code"])]
+            query["cost_center"] = [str(row["cost_center_name"])]
             return f"/audit/jib?{urlencode(query, doseq=True)}"
 
         return {
@@ -488,7 +490,17 @@ def _production_chart(data: pd.DataFrame, cumulative: bool) -> tuple[str, str] |
 def _price_chart(data: pd.DataFrame) -> tuple[str, str] | None:
     if data.empty:
         return None
-    monthly = data.groupby(["report_month", "product"], as_index=False)["average_unit_price"].mean()
+    monthly = (
+        data.assign(
+            total_unit_price=lambda frame: frame["average_unit_price"]
+            * frame["priced_line_count"]
+        )
+        .groupby(["report_month", "product"], as_index=False)[
+            ["total_unit_price", "priced_line_count"]
+        ]
+        .sum()
+    )
+    monthly["average_unit_price"] = monthly["total_unit_price"] / monthly["priced_line_count"]
     plot = figure(
         height=360,
         x_axis_type="datetime",

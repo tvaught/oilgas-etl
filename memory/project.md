@@ -2,9 +2,9 @@
 
 ## Objective
 
-Build a deterministic, auditable ETL pipeline that converts oil and gas accounting PDFs into normalized DuckDB data for validation, reporting, Excel/Power Query review, and future analytics.
+Convert oil and gas accounting PDFs into deterministic, auditable DuckDB data for financial reporting, PDF reconciliation, Excel exports, and browser-based analysis.
 
-Supported document families:
+Supported formats:
 
 - EnergyLink-style revenue statements.
 - Highmark EnergyLink `Operator Invoice - JIB` packages.
@@ -12,178 +12,96 @@ Supported document families:
 ## Pipeline
 
 ```text
-PDF
-  -> PDFExtractor / layout analysis
-  -> DocumentClassifier
-  -> document-specific parser
-  -> Pydantic models
-  -> repository validation + duplicate detection
-  -> DuckDB tables/views
-  -> SQL / Excel / analytics
-```
-
-Core commands:
-
-```bash
-uv run oilgas init
-uv run oilgas ingest <path>
-uv run oilgas parse <pdf>
-uv run oilgas jib parse <pdf>
-uv run oilgas jib ingest <path>
-uv run pytest
+PDF -> extraction/layout -> classifier -> parser -> Pydantic model
+    -> validation/repository -> DuckDB -> web/Excel/reporting
 ```
 
 ## Design Principles
 
-- Deterministic parser rules are preferred over fuzzy heuristics.
-- Source layout is authoritative.
-- Preserve source signs/values where meaningful.
-- Store normalized business data, not raw coordinates/text, for now.
-- Validate financial totals and fail loudly on ambiguous detail rows.
-- Keep parser-specific behavior isolated by document/operator format.
+- Prefer explicit, parser-specific rules to broad heuristics.
+- Treat PDF/source layout as authoritative.
+- Preserve source rows/values when needed for auditability.
+- Keep JIB cost centers distinct from revenue properties.
+- Use strict validation for financial totals and ambiguous rows.
+- Keep reporting calculations SQL-first and auditable.
 
-## Revenue Model
-
-Revenue output is conceptually:
+## Revenue Model and Important Rules
 
 ```text
-RevenueStatement
-  -> RevenueProperty
-    -> RevenueProduct
-      -> RevenueLine
+RevenueStatement -> RevenueProperty -> RevenueProduct -> RevenueLine
 ```
 
-Important fields include check number/date/amount, operator, property, product, production period, owner/distribution interest, owner volume, deductions, and owner net value.
+Key fields include production/check dates, property/product, volume, unit price, property values, interests, owner deductions, and owner net value.
 
-Important behavior:
+- `owner_net_value` may be null for a raw source line with no source net field.
+- Reporting sums naturally ignore null net values.
+- XTO full lines use explicit coordinates: Property Volume at x≈361, Price at x≈412, Value at x≈460.
+- XTO bare `MIS`/`TRN` deduction rows use x≈712 for `owner_deductions`, retain their own row, and do not alter the preceding SEV owner-net field.
+- Other generic continuation logic remains narrow and only merges rows that actually contain an owner-net continuation value.
 
-- Duplicate detection uses `source_file.sha256` and existing statement linkage.
-- Page breaks can split property/product sections; parser builds property blocks across pages.
-- Bare continuation codes `TRN`, `MIS`, `TRT`, `GAT` merge into prior logical `SEV` or `MIS` rows.
-- Interest-qualified rows such as `WI TRN` are independent.
-- `JOINT INTEREST BILLING` can be a product heading.
+Revenue duplicate identity: source-file SHA256.
 
-Revenue validation target:
+## JIB Model and Important Rules
 
 ```text
-sum(revenue_line.owner_net_value) == revenue_statement.check_amount
+JIBInvoice -> JIBCostCenterSummary + JIBLine
 ```
 
-## JIB Model
+- Highmark only in Phase 1.
+- Skip Statement of Account pages.
+- Expenses are positive `invoiced_amount`; credit/reversal source sign is retained.
+- Duplicate identity: operator + invoice number.
+- Operator is taken from Highmark accounting-month header where available, not the owner/invoice row.
+- Canonical name normalizer folds `HIGHMARK ENERGY OPERATING, LLC` into `HIGHMARK ENERGY OPERATING LLC`.
 
-Phase 1 JIB support targets Highmark only.
-
-JIB output is conceptually:
-
-```text
-JIBInvoice
-  -> JIBCostCenterSummary
-  -> JIBLine
-```
-
-Important invoice fields:
-
-- operator
-- owner_number
-- invoice_number
-- invoice_date
-- accounting_period
-- invoice_total
-
-Important cost center/detail fields:
-
-- cost_center_code
-- cost_center_name
-- afe
-- description
-- cost_class
-- account_group
-- op_account
-- minor_account
-- vendor_name
-- vendor_invoice
-- activity_period
-- partner_percent
-- gross_amount
-- invoiced_amount
-
-Accounting conventions:
-
-- JIB expenses are stored positive in `invoiced_amount`.
-- Credits/reversals retain source sign.
-- JIB cost centers are not revenue properties and should not be inserted into `property`.
-- Cashflow reporting should compute revenue minus JIB expense.
-
-Duplicate JIB detection:
-
-```text
-operator_id + invoice_number
-```
-
-JIB validation targets:
-
-- summary invoiced total equals invoice total.
-- detail invoiced total equals invoice total.
-- detail totals by cost center equal summary totals by cost center, after aggregating duplicate summary rows.
-
-## DuckDB Tables
-
-Important table groups:
-
-- `source_file`
-- `operator`
-- `property`
-- `revenue_statement`
-- `revenue_product`
-- `revenue_line`
-- `jib_invoice`
-- `jib_cost_center`
-- `jib_cost_center_summary`
-- `jib_line`
-- `vendor`
-
-Schema files are in `sql/`. There is no migration system yet; rebuilding the DB may be required after schema changes.
+JIB validation checks invoice, summary, and cost-center detail totals.
 
 ## Reporting App
 
-The initial web MVP lives in `src/oilgas/web/` and is started with:
+Located in `src/oilgas/web/`.
 
-```bash
-uv run oilgas app
+- Flask + Jinja, embedded Bokeh; no Bokeh server, Plotly service, ORM, or SQLAlchemy.
+- Direct read-only DuckDB queries in `ReportRepository`.
+- Pages: cashflow/overview, cashflow detail, production, prices, revenue audit, JIB audit.
+- Cashflow supports monthly/quarterly/annual rollups, cumulative values, period-aware axes, and latest-first tables.
+- Property/cost-center comparisons are deliberately unallocated. Filtering a single dimension suppresses unrelated unfiltered rows; selecting both displays both filtered branches.
+- Audit source links resolve `source_file.filepath`; ingest on the host that serves PDFs.
+- CSV/XLSX export supported.
+
+## Production: `openhollow`
+
+The working deployment is `https://oilgas.openhollow.com`.
+
+```text
+Nginx TLS proxy -> Gunicorn (one worker, 127.0.0.1:8000) -> Flask/Bokeh
 ```
 
-Technology choices:
+- `travis` is the key-authenticated deployment/admin account.
+- `oilgas` is the non-login system service account.
+- systemd service is `oilgas.service`.
+- Nginx and Certbot manage public HTTP/HTTPS/TLS.
+- Linode firewall plus UFW expose SSH, HTTP, HTTPS only.
+- `OILGAS_AUTH_REQUIRED=true` enables Google OAuth and approved-email access; do not store production values in Git.
+- `ProxyFix` honors Nginx forwarding headers for correct OAuth HTTPS callback generation.
+- Production database/PDFs are under `/srv/oilgas/data/`.
 
-- Flask with server-rendered Jinja templates.
-- Bokeh embedded in Flask pages; no Bokeh server or external Plotly service.
-- Direct read-only DuckDB SQL in `ReportRepository`, not an ORM.
-- CSV/XLSX exports (`openpyxl`) of report data.
-- Source PDF route resolves the existing `source_file.filepath`; PDFs are not stored as DuckDB BLOBs.
+See `deploy/README.md` for non-secret deployment procedures.
 
-Implemented reports/pages:
+## Dependency and Deployment Notes
 
-- monthly revenue, JIB expense, and net cashflow;
-- production history using property gross and recorded owner fields;
-- simple-average source unit-price history, excluding non-positive price/volume values;
-- revenue and JIB detail audit tables with source PDF links.
+- `uv.lock` is committed for reproducible production installs.
+- Production uses `gunicorn` and `authlib`; `requests` is explicitly declared because Authlib Flask integration requires it.
+- Production virtualenv must resolve Python from `/srv/oilgas/python`, not a user-private uv installation under `/home/travis`.
+- Apply code changes: `git pull --ff-only`, `uv sync --frozen`, permissions update if needed, `systemctl restart oilgas`.
 
-Cashflow is rolled up by month without property-to-JIB matching. Its drilldown shows revenue by operator/property and JIB expense by operator/cost center as separate records; no expense is allocated automatically.
+## Testing
 
-Future web work:
+Last known complete result: **36 passed**.
 
-- printable/PDF evidence packages and Bokeh PNG/SVG export;
-- trailing-12-month deficit dashboard for prudent-operator analysis;
-- authentication before non-local deployment;
-- prudent-operator deficit analysis by operator/property/cost center;
+Important regression coverage includes:
 
-## Testing / Coverage
-
-Relevant tests include revenue parser/repository/totals, JIB parser/repository, classifier, hashing, and parser model tests.
-
-Recently added coverage tests:
-
-- `tests/test_classifier.py`
-- `tests/test_hashing.py`
-- `tests/test_parser_model.py`
-
-Last known suite result: `29 passed`.
+- revenue statement total persistence;
+- XTO price/volume mapping;
+- XTO raw MIS/TRN deduction preservation;
+- Highmark split-header operator parsing/canonicalization;
+- Google-auth configuration and unauthenticated route protection.

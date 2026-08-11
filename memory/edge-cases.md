@@ -1,117 +1,104 @@
-# Known Parsing Edge Cases
+# Known Parsing and Deployment Edge Cases
 
-## Revenue
+## Revenue: XTO Source Rows
 
-### Bare Continuation Transactions
+### Price / Volume Positions
 
-Known bare continuation codes:
-
-- `TRN`
-- `MIS`
-- `TRT`
-- `GAT`
-
-These are not independent rows when they lack an interest-qualified prefix such as `WI`, `RI`, or `OR`. They merge into the previous logical base row when the base row ends in:
-
-- `SEV`
-- `MIS`
-
-Merge behavior:
-
-- add continuation `owner_net_value` to the base row.
-- preserve base row metadata.
-- suppress continuation row from final output.
-
-Interest-qualified rows such as `WI TRN` stay independent.
-
-### Owner Net Normalization
-
-Some XTO/Chevron-style bare continuation or deduction rows place the only owner-level amount in a coordinate slot closer to `owner_volume` than `owner_net_value`.
-
-Current parser normalizes `owner_volume` to `owner_net_value` when `owner_net_value` is missing for bare:
-
-- `TRN`
-- `MIS`
-- `TRT`
-- `GAT`
-- `DEDUCT`
-
-### Page Breaks
-
-Revenue properties/products can continue across page breaks before the next `Property:` header. The parser builds property blocks across the document and skips repeated page furniture so top-of-page detail rows are not orphaned.
-
-### Product Heading Ambiguity
-
-`JOINT INTEREST BILLING` contains `INTEREST` but is a valid product heading on Highmark revenue statements. Keep explicit handling for it.
-
-## JIB
-
-### Statement of Account Pages
-
-Highmark JIB packages may begin with `Statement of Account` pages listing outstanding invoices. These are ignored. Parsing begins at the first Highmark `Operator Invoice - JIB` invoice summary/detail page.
-
-Statement-of-account-only PDFs and unsupported non-Highmark JIB PDFs currently return no parsed invoice and are skipped.
-
-### Duplicate Cost Centers in Summary
-
-A summary can have multiple rows for the same cost center, for example one AFE-specific row plus one non-AFE row. Validation must aggregate summary rows by cost center before comparing to detail totals.
-
-### Repeated Detail Headers
-
-Highmark detail pages repeat headers such as:
-
-- `Statement`
-- `Partner Operator Invoice`
-- `Invoice Number ...`
-- `Op Accounting Month ...`
-- `Cost Center ...`
-- column headers
-
-The parser skips these rows. Repeated `Cost Center` headers for the same cost center should not reset pending vendor/detail continuation state.
-
-### Vendor and Description Continuations
-
-Vendor metadata may appear after a detail row using `~` separators, e.g.:
+XTO’s Property columns differ from the original generic map:
 
 ```text
-JOE R. MAY OILFIELD PIPE & SUPPLY, LTD.~05-OI-693~~~~~~
+x≈361 -> property_volume
+x≈412 -> unit_price
+x≈460 -> property_gross_value
 ```
 
-The parser stores `vendor_name` and `vendor_invoice` from these rows.
+Do not swap Volume and Price. Example January 2025 XTO oil rows have volumes such as `29.93` BBL and price `72.67`.
 
-Plain free-text continuation rows without `~` are appended to the prior line description.
+### Bare MIS/TRN Deduction Rows
 
-### Cost Class / Account Group Context
+For XTO fixed-layout bare `MIS`, `TRN`, `TRT`, or `GAT` rows, e.g.:
 
-Highmark detail pages include context headings that apply to following lines until replaced.
+```text
+Jun 22 MIS 0.14852000 0.00 3.68
+Jun 22 TRN 0.14852000 0.00 (12.45)
+```
 
-Known cost classes include:
+- source x≈516 is property deductions;
+- source x≈712 is owner deductions;
+- there is no source owner-net value;
+- preserve each raw row;
+- leave `owner_net_value` null;
+- do not merge it into the preceding SEV row.
 
-- `Capital`
-- `Expense`
-- `Leasehold`
+Example for XTO `2022_07_29` / property `D668792-261`:
 
-Known account group examples include:
+```text
+WI SEV  owner_deductions=-17.95  owner_net_value=375.42
+MIS     owner_deductions=  3.68  owner_net_value=null
+TRN     owner_deductions=-12.45  owner_net_value=null
+```
 
-- `RWO-REMEDIAL WORKOVER`
-- `LOE-LEASE OPERATING EXPENSE`
-- `Lease Operating Expense`
-- `Plug and Abandon`
+This reconciles owner deductions to `-26.72` while preserving the PDF Property Total owner net of `375.42`.
 
-### Unsupported Formats
+### Generic Continuations
 
-Finley and Chevron JIB samples exist in `data/raw/finley/jib/` and `data/raw/chevron/jib/`, but are not supported yet. Add separate parser logic rather than broadening Highmark rules.
+Bare `TRN`, `MIS`, `TRT`, and `GAT` should only merge into a previous `SEV`/`MIS` row when the parsed record genuinely carries an owner-net continuation amount. Interest-qualified rows such as `WI TRN` remain independent.
 
-## Reporting: Property / Cost Center Rollups
+### Page Breaks / Headings
 
-Revenue properties and JIB cost centers are different source concepts. The reporting app does not match or allocate them. Cashflow is rolled up by month only; monthly drilldown shows independent revenue-property and JIB-cost-center records.
+- Property/product blocks can span page breaks before another property header.
+- `JOINT INTEREST BILLING` is a valid product heading despite containing `INTEREST`.
 
-Plant/general costs therefore remain visible as independent cost-center expenses.
+## JIB: Highmark Headers
 
-## Reporting: Source PDFs
+Highmark invoice packages can separate operator and owner data across rows:
 
-Audit links resolve `source_file.filepath`, which is an absolute ingestion-time path. If the reporting app is run on another machine, the raw PDF directory must be copied/synced to an equivalent available location or the link returns unavailable.
+```text
+16556 HIGHMARK ENERGY OPERATING LLC Op Accounting Month June 2025
+WHITE HAT EXPLORATION LTD PO BOX ... Invoice Number ...
+```
+
+Use the accounting-month row for the operator. Do not parse the White Hat owner/address row as the operator.
+
+Normalize the comma variation:
+
+```text
+HIGHMARK ENERGY OPERATING, LLC -> HIGHMARK ENERGY OPERATING LLC
+```
+
+## JIB: Existing Parsing Rules
+
+- Skip Statement of Account pages.
+- Aggregate duplicate summary cost centers before total comparison.
+- Repeated detail headers must not reset continuation state for the same cost center.
+- `~` vendor lines populate vendor name/invoice.
+- Plain free-text vendor/service lines append to preceding description.
+- Cost class/account-group headings apply to following lines until changed.
+- Finley/Chevron JIB samples remain unsupported; add separate parser logic.
+
+## Reporting Rules
+
+### Property / Cost Center
+
+Revenue properties and JIB cost centers are separate source concepts. The app does not auto-match or allocate expenses.
+
+- property-only filter -> only matching revenue rows;
+- cost-center-only filter -> only matching JIB rows;
+- both filters -> both selected record sets.
+
+### Source PDFs
+
+Audit links use absolute `source_file.filepath`. For a hosted deployment, ingest PDFs on the hosted server after syncing the raw archive; otherwise links point to unavailable paths.
+
+## Production: `openhollow`
+
+- Gunicorn must bind only to `127.0.0.1:8000`; do not expose port 8000 via firewall.
+- Nginx is the public HTTP/HTTPS proxy.
+- Google OAuth redirect URI is `https://oilgas.openhollow.com/auth/google/callback`.
+- `OILGAS_AUTH_REQUIRED=true` intentionally prevents service startup if any required secret or email allowlist is absent.
+- Gunicorn 26 attempts to create `/srv/oilgas/.gunicorn`; that directory must be owned by `oilgas`.
+- A venv created with Python under `/home/travis/.local/share/uv` fails for the `oilgas` service user. Install/use shared Python under `/srv/oilgas/python` and make it group-readable/executable.
 
 ## General Rule
 
-When uncertain, keep deterministic behavior, fail on ambiguous financial rows, and add narrow edge-case handling with tests rather than broad heuristics.
+When uncertain, preserve deterministic behavior, retain auditable source semantics, fail clearly for ambiguous financial data, and add narrowly scoped regression tests.

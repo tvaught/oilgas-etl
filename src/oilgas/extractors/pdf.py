@@ -4,9 +4,7 @@ from pathlib import Path
 
 import fitz
 
-from .models import PDFDocument
-from .models import PDFPage
-from .models import PDFWord
+from .models import PDFDocument, PDFPage, PDFWord
 
 
 class PDFExtractor:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from oilgas.document import BlockType, DocumentBlock
 from oilgas.layout import Layout
 from oilgas.parsers.property_headers import ALL_PROPERTY_HEADER_PARSERS

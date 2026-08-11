@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any
 
+from oilgas.layout.rows import LayoutRow
 from oilgas.parsers.property_headers import PropertyHeaderParser
 
 
@@ -23,7 +24,7 @@ class DocumentBlock:
     end_row: int
     rows: list[LayoutRow]
     parser: PropertyHeaderParser | None = None
-    children: list["DocumentBlock"] = field(default_factory=list)
+    children: list[DocumentBlock] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -44,5 +45,5 @@ class DocumentBlock:
         try:
             return self.metadata[key]
 
-        except KeyError:
-            raise ValueError(f"Missing metadata '{key}' in {self.type} block.")
+        except KeyError as error:
+            raise ValueError(f"Missing metadata '{key}' in {self.type} block.") from error
