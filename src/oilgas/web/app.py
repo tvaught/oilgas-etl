@@ -7,13 +7,26 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import pandas as pd
+from authlib.integrations.flask_client import OAuth
 from bokeh.embed import components
 from bokeh.models import ColumnDataSource, HoverTool
 from bokeh.palettes import Category10
 from bokeh.plotting import figure
-from flask import Flask, Response, abort, render_template, request, send_file
+from flask import (
+    Flask,
+    Response,
+    abort,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from oilgas.config import settings
+from oilgas.web.auth import authentication_settings
 from oilgas.web.filters import ReportFilters
 from oilgas.web.reports import ReportRepository
 
@@ -22,8 +35,65 @@ def create_app(database_path: Path | None = None) -> Flask:
     """Create the read-only local reporting application."""
     path = database_path or settings.database
     repository = ReportRepository(path)
+    auth = authentication_settings()
     app = Flask(__name__)
-    app.config["DATABASE_PATH"] = path
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1, x_proto=1)
+    app.config.update(
+        DATABASE_PATH=path,
+        SECRET_KEY=auth.secret_key,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=auth.required,
+        PERMANENT_SESSION_LIFETIME=43200,
+    )
+
+    google = None
+    if auth.required:
+        oauth = OAuth(app)
+        google = oauth.register(
+            name="google",
+            client_id=auth.google_client_id,
+            client_secret=auth.google_client_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
+
+    @app.before_request
+    def require_login():
+        if not auth.required or request.endpoint in {"login", "google_callback", "static"}:
+            return None
+        if session.get("email"):
+            return None
+        return redirect(url_for("login"))
+
+    @app.get("/login")
+    def login():
+        if not auth.required:
+            return redirect(url_for("index"))
+        if session.get("email"):
+            return redirect(url_for("index"))
+        assert google is not None
+        return google.authorize_redirect(url_for("google_callback", _external=True))
+
+    @app.get("/auth/google/callback")
+    def google_callback():
+        assert google is not None
+        token = google.authorize_access_token()
+        userinfo = token.get("userinfo") or google.get("userinfo").json()
+        email = str(userinfo.get("email", "")).casefold()
+        if not userinfo.get("email_verified") or email not in auth.allowed_emails:
+            session.clear()
+            abort(403, "Your Google account is not approved for this application.")
+        session.clear()
+        session["email"] = email
+        session["name"] = userinfo.get("name", email)
+        session.permanent = True
+        return redirect(url_for("index"))
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login" if auth.required else "index"))
 
     @app.template_filter("display_value")
     def display_value(value: object, column: str) -> str:
@@ -66,6 +136,8 @@ def create_app(database_path: Path | None = None) -> Flask:
 
         return {
             "filter_options": repository.filter_options(),
+            "auth_required": auth.required,
+            "current_user_name": session.get("name"),
             "cashflow_detail_url": cashflow_detail_url,
             "detail_audit_url": detail_audit_url,
         }

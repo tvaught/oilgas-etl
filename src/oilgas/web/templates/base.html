@@ -14,6 +14,9 @@
     .brand { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .85rem; }
     .brand h1 { font-size: 1.2rem; letter-spacing: .01em; margin: 0; }
     .brand span { color: #b9dfe0; font-size: .8rem; }
+    .account { align-items: center; display: flex; gap: .55rem; margin-left: auto; position: relative; z-index: 2; }
+    .account span { color: #e9f4f5; font-size: .78rem; }
+    .account button { background: #ffffff1c; border: 1px solid #ffffff35; box-shadow: none; font-size: .75rem; padding: .3rem .48rem; }
     nav { display: flex; gap: .25rem; flex-wrap: wrap; }
     nav a { border-radius: .4rem; color: #e9f4f5; font-size: .9rem; padding: .42rem .62rem; text-decoration: none; }
     nav a:hover { background: #ffffff1f; color: #fff; }
@@ -78,7 +81,7 @@
   {% block head %}{% endblock %}
 </head>
 <body>
-<header><div class="header-art" aria-hidden="true"><span></span></div><div class="site-header"><div class="brand"><h1>Oil &amp; Gas Reporting</h1><span>Read-only financial analysis</span></div><nav><a href="/">Overview</a><a href="/cashflow">Cashflow</a><a href="/production">Production</a><a href="/prices">Prices</a><a href="/audit/revenue">Revenue audit</a><a href="/audit/jib">JIB audit</a></nav></div></header>
+<header><div class="header-art" aria-hidden="true"><span></span></div><div class="site-header"><div class="brand"><h1>Oil &amp; Gas Reporting</h1><span>Read-only financial analysis</span>{% if current_user_name %}<div class="account"><span>{{ current_user_name }}</span><form method="post" action="/logout"><button type="submit">Sign out</button></form></div>{% endif %}</div><nav><a href="/">Overview</a><a href="/cashflow">Cashflow</a><a href="/production">Production</a><a href="/prices">Prices</a><a href="/audit/revenue">Revenue audit</a><a href="/audit/jib">JIB audit</a></nav></div></header>
 <main>{% block content %}{% endblock %}</main>
 </body>
 </html>

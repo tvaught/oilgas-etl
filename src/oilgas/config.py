@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from pathlib import Path
 class Settings:
     project_root: Path = Path.cwd()
 
-    database: Path = Path("data/oilgas.duckdb")
+    database: Path = Path(os.environ.get("OILGAS_DATABASE", "data/oilgas.duckdb"))
 
     schema_sql: Path = Path("sql/schema.sql")
 
