@@ -68,18 +68,14 @@ Sync the DuckDB database and matching raw source PDFs before starting the servic
 
 As `travis`:
 
+Use the committed deployment helper from the application checkout:
+
 ```bash
 cd /srv/oilgas/app
-git pull --ff-only
-uv sync --frozen
-sudo chown -R travis:oilgas /srv/oilgas/app
-sudo chmod -R g+rX /srv/oilgas/app
-sudo systemctl restart oilgas
+./deploy/update.sh
 ```
 
-Verify with:
-
-```bash
-sudo systemctl status oilgas --no-pager
-sudo journalctl -u oilgas -n 100 --no-pager
-```
+The script fast-forwards the checkout, installs the lockfile-pinned dependencies,
+repairs group read/execute permissions, restarts `oilgas`, and prints service status
+and the last 100 service-log lines. It must be run as the deployment user (`travis`),
+which has passwordless or interactive `sudo` access for the required commands.
