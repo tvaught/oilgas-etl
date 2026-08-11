@@ -5,12 +5,16 @@ import pytest
 from oilgas.document import BlockType, DocumentBlock
 from oilgas.extractors.models import PDFWord
 from oilgas.layout.rows import LayoutRow
-from oilgas.parsers.parser_models import ParsedRow
+from oilgas.parsers.parser_models import ParsedField, ParsedRow
 from oilgas.parsers.revenue_line import (
     LINE_TYPE,
+    OWNER_DEDUCTIONS,
     OWNER_NET_VALUE,
     OWNER_VOLUME,
+    PROPERTY_GROSS_VALUE,
+    PROPERTY_VOLUME,
     REVENUE_TYPE,
+    UNIT_PRICE,
     RevenueLineExtractor,
 )
 from oilgas.util.numbers import parse_decimal
@@ -66,6 +70,51 @@ def row(
         y=y,
         words=[word(text, center_x, y, i) for i, (text, center_x) in enumerate(tokens)],
     )
+
+
+def test_parse_xto_row_maps_price_separately_from_gross_value() -> None:
+    parser = extractor()
+    tokens = [
+        ParsedField("WI SEV", 100),
+        ParsedField("May 26", 40),
+        ParsedField("0.15691470", 203.8),
+        ParsedField("0.15691470", 252.6),
+        ParsedField("32.16", 361.4),
+        ParsedField("103.59", 411.9),
+        ParsedField("3,331.10", 460.0),
+        ParsedField("0.00", 516.8),
+        ParsedField("3,177.67", 561.9),
+        ParsedField("5.05", 617.8),
+        ParsedField("522.70", 662.8),
+        ParsedField("(24.07)", 711.8),
+        ParsedField("498.63", 758.4),
+    ]
+
+    record = parser._parse_xto_row(tokens)
+
+    assert parse_decimal(record.get(UNIT_PRICE)) == Decimal("103.59")
+    assert parse_decimal(record.get(PROPERTY_VOLUME)) == Decimal("32.16")
+    assert parse_decimal(record.get(PROPERTY_GROSS_VALUE)) == Decimal("3331.10")
+    assert parse_decimal(record.get(OWNER_NET_VALUE)) == Decimal("498.63")
+
+
+def test_parse_xto_bare_mis_as_owner_deduction_not_owner_net() -> None:
+    parser = extractor()
+    tokens = [
+        ParsedField("MIS", 138.5),
+        ParsedField("Jun 22", 39.3),
+        ParsedField("0.14852000", 203.8),
+        ParsedField("0.00", 516.8),
+        ParsedField("3.68", 713.9),
+    ]
+
+    assert parser._is_xto_deduction_layout(tokens) is True
+
+    record = parser._parse_xto_row(tokens)
+
+    assert parse_decimal(record.get(OWNER_DEDUCTIONS)) == Decimal("3.68")
+    assert record.get(OWNER_NET_VALUE) is None
+    assert parser._is_continuation(record) is False
 
 
 def test_normalize_owner_net_value_moves_bare_trn_owner_volume() -> None:
@@ -132,7 +181,7 @@ def test_merge_into_previous_rejects_unrelated_previous() -> None:
         parser._merge_into_previous(previous, continuation)
 
 
-def test_extract_suppresses_continuation_rows() -> None:
+def test_extract_preserves_xto_owner_deduction_rows() -> None:
     product_block = DocumentBlock(
         type=BlockType.PRODUCT,
         start_row=0,
@@ -170,6 +219,9 @@ def test_extract_suppresses_continuation_rows() -> None:
 
     rows = RevenueLineExtractor(product_block).extract()
 
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0].get(LINE_TYPE) == "WI SEV"
-    assert parse_decimal(rows[0].get(OWNER_NET_VALUE)) == Decimal("288.39")
+    assert parse_decimal(rows[0].get(OWNER_NET_VALUE)) == Decimal("304.18")
+    assert rows[1].get(LINE_TYPE) == "TRN"
+    assert parse_decimal(rows[1].get(OWNER_DEDUCTIONS)) == Decimal("-15.79")
+    assert rows[1].get(OWNER_NET_VALUE) is None

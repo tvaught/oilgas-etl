@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} | Oil &amp; Gas Reporting</title>
+  <link rel="stylesheet" href="https://cdn.bokeh.org/bokeh/release/bokeh-3.9.2.min.css">
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172533; background: #f4f7f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at top right, #e1f0ef 0, transparent 28rem), #f4f7f8; }
+    header { background: linear-gradient(115deg, #102f47, #1b5970); box-shadow: 0 3px 18px #0e243733; color: #fff; }
+    .site-header { max-width: 1540px; margin: 0 auto; padding: 1.05rem 2rem .85rem; }
+    .brand { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .85rem; }
+    .brand h1 { font-size: 1.2rem; letter-spacing: .01em; margin: 0; }
+    .brand span { color: #b9dfe0; font-size: .8rem; }
+    nav { display: flex; gap: .25rem; flex-wrap: wrap; }
+    nav a { border-radius: .4rem; color: #e9f4f5; font-size: .9rem; padding: .42rem .62rem; text-decoration: none; }
+    nav a:hover { background: #ffffff1f; color: #fff; }
+    main { max-width: 1540px; margin: 0 auto; padding: 1.8rem 2rem 2.5rem; }
+    h2 { font-size: 1.65rem; letter-spacing: -.025em; margin: 0 0 1.15rem; }
+    .filters, .summary, .chart, .table-wrap, .empty { background: #fff; border: 1px solid #d9e2e7; border-radius: .7rem; box-shadow: 0 2px 7px #1725330a; }
+    .filters { margin-bottom: 1rem; overflow: hidden; padding: 1rem; }
+    .filter-section + .filter-section { border-top: 1px solid #e4ebee; margin-top: 1rem; padding-top: 1rem; }
+    .filter-heading { color: #55717d; font-size: .72rem; font-weight: 750; letter-spacing: .08em; margin: 0 0 .7rem; text-transform: uppercase; }
+    .filter-row { display: grid; gap: .85rem; }
+    .filter-row.settings { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+    .filter-row.dimensions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    label { color: #38505d; display: grid; font-size: .79rem; font-weight: 700; gap: .36rem; min-width: 0; }
+    select, input, button { font: inherit; }
+    select, input { background: #fbfcfc; border: 1px solid #bfcdd4; border-radius: .38rem; color: #172533; min-width: 0; padding: .5rem .6rem; width: 100%; }
+    select:focus, input:focus { border-color: #25828a; box-shadow: 0 0 0 3px #25828a22; outline: 0; }
+    select[multiple] { height: 8.6rem; padding: .28rem; }
+    .actions { align-items: center; display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 1rem; }
+    button { background: linear-gradient(115deg, #16566a, #248087); border: 0; border-radius: .4rem; box-shadow: 0 1px 2px #173f5f33; color: #fff; cursor: pointer; font-weight: 700; padding: .55rem .85rem; }
+    button:hover { filter: brightness(1.07); }
+    .actions a { color: #176575; font-size: .88rem; font-weight: 650; text-decoration: none; }
+    .actions a:hover, td a:hover { text-decoration: underline; }
+    .note { color: #58707c; font-size: .9rem; margin: .3rem .15rem 1rem; }
+    .summary { display: flex; gap: 1.4rem; margin-bottom: 1rem; padding: .95rem 1.1rem; }
+    .metric { border-left: 3px solid #66a5a4; display: grid; gap: .15rem; padding-left: .65rem; }
+    .metric span { color: #607581; font-size: .73rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .metric strong { font-size: 1.12rem; font-variant-numeric: tabular-nums; }
+    .chart { margin-bottom: 1rem; padding: 1rem; }
+    .table-wrap { overflow-x: auto; overflow-y: visible; }
+    table { border-collapse: collapse; font-size: .82rem; width: 100%; }
+    th, td { border-bottom: 1px solid #edf2f4; padding: .58rem .65rem; text-align: left; white-space: nowrap; }
+    th { background: #edf4f5; color: #38505d; font-size: .72rem; letter-spacing: .035em; position: sticky; text-transform: uppercase; top: 0; z-index: 1; }
+    tbody tr:hover { background: #f2f8f8; }
+    th.number, td.number { font-variant-numeric: tabular-nums; text-align: right; }
+    td a { color: #106775; font-weight: 700; text-decoration: none; }
+    .empty { color: #58707c; padding: 1rem; }
+    @media (max-width: 1100px) { .filter-row.settings { grid-template-columns: repeat(3, minmax(0, 1fr)); } .filter-row.dimensions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 650px) { .site-header, main { padding-left: 1rem; padding-right: 1rem; } .filter-row.settings, .filter-row.dimensions { grid-template-columns: 1fr; } h2 { font-size: 1.4rem; } .summary { gap: .8rem; } }
+
+    /* Report flourishes: intentionally decorative, while keeping the data dense. */
+    body::before { background-image: linear-gradient(#1b597008 1px, transparent 1px), linear-gradient(90deg, #1b597008 1px, transparent 1px); background-size: 32px 32px; content: ""; inset: 0; mask-image: linear-gradient(to bottom, #000 0, transparent 38rem); pointer-events: none; position: fixed; z-index: -1; }
+    header { overflow: hidden; position: relative; }
+    header::after { border: 1px solid #9acfd133; border-radius: 50%; content: ""; height: 19rem; position: absolute; right: -5rem; top: -12rem; transform: rotate(-18deg); width: 31rem; }
+    .header-art { height: 7.5rem; opacity: .72; overflow: hidden; pointer-events: none; position: absolute; right: 1.4rem; top: 0; width: 23rem; }
+    .header-art::before { background: repeating-linear-gradient(118deg, transparent 0 14px, #b7e4e326 15px 16px, transparent 17px 30px); content: ""; inset: 0; position: absolute; transform: skewX(-18deg); }
+    .header-art::after { border-bottom: 2px solid #d8af743d; border-radius: 50%; box-shadow: 0 1.5rem 0 -1px #87cfca36, 0 3rem 0 -1px #d8af7430; content: ""; height: 3.5rem; position: absolute; right: .8rem; top: 1.4rem; transform: rotate(-13deg); width: 18rem; }
+    .header-art span { background: #d8af74; border-radius: 50%; box-shadow: 3.9rem 1.5rem 0 #88cfca, 8.4rem -.4rem 0 #d8af74, 12.3rem 1.8rem 0 #88cfca; height: .42rem; position: absolute; right: 2.2rem; top: 3.1rem; width: .42rem; }
+    .site-header { position: relative; z-index: 1; }
+    .brand h1::before { background: #8ed0cb; border-radius: 50%; box-shadow: 0 0 0 5px #8ed0cb24; content: ""; display: inline-block; height: .48rem; margin: 0 .65rem .08rem 0; width: .48rem; }
+    .page-title { align-items: center; display: flex; justify-content: space-between; margin: 0 0 1.15rem; min-height: 4.2rem; overflow: hidden; position: relative; }
+    .page-title::after { background: linear-gradient(90deg, #70aaa910, #70aaa940); border-radius: 999px; content: ""; height: 5.8rem; position: absolute; right: 1.6rem; transform: rotate(-24deg); width: 1.15rem; }
+    .page-title::before { background: linear-gradient(135deg, #e0b56f, #d27b50); border-radius: 50%; box-shadow: 1.5rem 1rem 0 #59a2a126; content: ""; height: .7rem; position: absolute; right: 4.4rem; top: .7rem; width: .7rem; }
+    .eyebrow { color: #3c8589; font-size: .7rem; font-weight: 800; letter-spacing: .11em; margin: 0 0 .25rem; text-transform: uppercase; }
+    .page-title h2 { margin: 0; position: relative; z-index: 1; }
+    .filters { border-top: 3px solid #75b5b1; }
+    .filters::before { background: linear-gradient(90deg, #dfeeed, transparent); content: ""; display: block; height: 2px; margin: -.15rem 0 .85rem; }
+    .filter-heading::before { background: #d89b5b; border-radius: 50%; content: ""; display: inline-block; height: .38rem; margin: 0 .42rem .05rem 0; width: .38rem; }
+    .summary { background: linear-gradient(110deg, #fff, #f5fbfb); border-left: 4px solid #61a7a4; }
+    .chart { background: linear-gradient(160deg, #fff 0, #fbfdfd 100%); border-top: 2px solid #d8e9e8; }
+    .table-wrap { border-top: 3px solid #d6e9e8; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header><div class="header-art" aria-hidden="true"><span></span></div><div class="site-header"><div class="brand"><h1>Oil &amp; Gas Reporting</h1><span>Read-only financial analysis</span></div><nav><a href="/">Overview</a><a href="/cashflow">Cashflow</a><a href="/production">Production</a><a href="/prices">Prices</a><a href="/audit/revenue">Revenue audit</a><a href="/audit/jib">JIB audit</a></nav></div></header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

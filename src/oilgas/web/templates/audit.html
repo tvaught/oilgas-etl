@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-title"><div><p class="eyebrow">Source-document audit trail</p><h2>{{ title }}</h2></div></section>
+<form class="filters" method="get">
+  <section class="filter-section"><div class="filter-heading">Period and date basis</div><div class="filter-row dimensions">
+    <label>Start month<select name="start_month"><option value="">All available months</option>{% for value, label in filter_options.months %}<option value="{{ value }}" {% if value == filters.start_month_value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>End month<select name="end_month"><option value="">All available months</option>{% for value, label in filter_options.months %}<option value="{{ value }}" {% if value == filters.end_month_value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Revenue date<select name="revenue_date"><option value="production" {% if filters.revenue_date_basis == 'production' %}selected{% endif %}>Production period</option><option value="check" {% if filters.revenue_date_basis == 'check' %}selected{% endif %}>Check date</option></select></label>
+    <label>JIB date<select name="jib_date"><option value="accounting" {% if filters.jib_date_basis == 'accounting' %}selected{% endif %}>Accounting period</option><option value="invoice" {% if filters.jib_date_basis == 'invoice' %}selected{% endif %}>Invoice date</option></select></label>
+  </div></section>
+  <section class="filter-section"><div class="filter-heading">Dimensions</div><div class="filter-row dimensions">
+    <label>Operators<select name="operator" multiple>{% for value in filter_options.operators %}<option value="{{ value }}" {% if value in filters.operators %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Properties<select name="property" multiple>{% for value in filter_options.properties %}<option value="{{ value }}" {% if value in filters.properties %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Products<select name="product" multiple>{% for value in filter_options.products %}<option value="{{ value }}" {% if value in filters.products %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Cost center names<select name="cost_center" multiple>{% for value in filter_options.cost_centers %}<option value="{{ value }}" {% if value in filters.cost_centers %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+  </div></section>
+  <div class="actions"><button type="submit">Apply filters</button><a href="{{ request.path }}">Clear filters</a><a href="/export/{{ report_name }}.csv?{{ request.query_string.decode() }}">CSV</a><a href="/export/{{ report_name }}.xlsx?{{ request.query_string.decode() }}">Excel</a></div>
+</form>
+{% if rows %}<div class="table-wrap"><table><thead><tr>{% for column in columns %}<th class="{% if column in numeric_columns %}number{% endif %}">{{ column.replace('_', ' ') }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for column in columns %}<td class="{% if column in numeric_columns %}number{% endif %}">{% if column == 'source_file_id' and row[column] %}<a href="/source/{{ row[column] }}" target="_blank">PDF</a>{% else %}{{ row[column]|display_value(column) }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty">No rows match these filters.</p>{% endif %}
+{% endblock %}

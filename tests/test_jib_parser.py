@@ -5,9 +5,11 @@ import pytest
 
 from oilgas.extractors.pdf import PDFExtractor
 from oilgas.parsers.jib import JIBParser
+from oilgas.util.operators import canonical_operator_name
 
 HIGHMARK_JIB = Path("data/raw/highmark/jib/2026_06_15 Highmark.pdf")
 FINLEY_STATEMENT_ONLY = Path("data/raw/finley/jib/2022_10_18 Finley.pdf")
+SPLIT_HEADER_HIGHMARK_JIB = Path("data/raw/highmark/jib/2025_07_15 Highmark.pdf")
 
 
 @pytest.mark.skipif(
@@ -33,6 +35,31 @@ def test_parse_highmark_jib_invoice_package() -> None:
     assert first_line.afe == "10*26022477 TUBING REPAIR"
     assert first_line.vendor_name == "JOE R. MAY OILFIELD PIPE & SUPPLY, LTD."
     assert first_line.vendor_invoice == "05-OI-693"
+
+
+def test_canonical_operator_name_removes_highmark_comma_variant() -> None:
+    assert canonical_operator_name("HIGHMARK ENERGY OPERATING, LLC") == (
+        "HIGHMARK ENERGY OPERATING LLC"
+    )
+
+
+def test_parse_operator_from_accounting_row() -> None:
+    assert JIBParser()._parse_operator("16556 HIGHMARK ENERGY OPERATING LLC") == (
+        "HIGHMARK ENERGY OPERATING LLC"
+    )
+
+
+@pytest.mark.skipif(
+    not SPLIT_HEADER_HIGHMARK_JIB.exists(),
+    reason="Highmark JIB PDF fixture is not available.",
+)
+def test_parse_highmark_jib_with_split_owner_operator_header() -> None:
+    document = PDFExtractor.load(SPLIT_HEADER_HIGHMARK_JIB)
+    invoice = JIBParser().parse(document, SPLIT_HEADER_HIGHMARK_JIB.name)
+
+    assert invoice is not None
+    assert invoice.operator == "HIGHMARK ENERGY OPERATING LLC"
+    assert invoice.invoice_number == "10*06-AR-2072"
 
 
 @pytest.mark.skipif(

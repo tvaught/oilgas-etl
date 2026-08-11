@@ -1,95 +1,107 @@
 # Current Project Status
 
-## Completed
+## Snapshot
+
+`oilgas-etl` is a Python/DuckDB ETL for oil & gas accounting PDFs. It currently supports:
+
+- EnergyLink-style revenue statements.
+- Highmark EnergyLink `Operator Invoice - JIB` packages.
+
+Primary commands:
+
+```bash
+uv sync
+uv run pytest
+uv run oilgas init
+uv run oilgas ingest <path>
+uv run oilgas parse <pdf>
+uv run oilgas jib parse <pdf>
+uv run oilgas jib ingest <path>
+```
+
+Last known full test result: `29 passed`.
+
+## Implemented
 
 ### Revenue ETL
 
-* Revenue parser extracts normalized transaction fields and persists revenue statements to DuckDB.
-* Continuation-aware revenue parsing is implemented.
-* Known XTO continuation codes currently include:
-  * `TRN`
-  * `MIS`
-  * `TRT`
-  * `GAT`
-* Bare continuation rows merge into the previous logical `SEV` or `MIS` base row.
-* Interest-qualified rows such as `WI TRN` remain independent rows.
-* Page-break-aware revenue property parsing is implemented so property/product rows that continue at the top of the next page are retained.
-* `JOINT INTEREST BILLING` is recognized as a revenue product heading when it appears on Highmark revenue statements.
-* Revenue duplicate detection is implemented using `source_file.sha256` and statement linkage.
-* Revenue statement total regression test validates that persisted `revenue_line.owner_net_value` sums to `revenue_statement.check_amount` for the Highmark June 2026 fixture.
+- Parses revenue statements into statement/property/product/line models and persists to DuckDB.
+- Duplicate detection uses `source_file.sha256` linked to `revenue_statement`.
+- Page-break-aware property/product parsing retains detail rows that continue at top of next page.
+- `JOINT INTEREST BILLING` is allowed as a product heading.
+- Continuation-aware line parsing handles bare continuation codes: `TRN`, `MIS`, `TRT`, `GAT`.
+- Bare continuation rows merge into prior `SEV` or `MIS` base rows.
+- Interest-qualified rows like `WI TRN` remain independent.
+- Regression tests include persisted revenue statement totals: `sum(revenue_line.owner_net_value) == revenue_statement.check_amount`.
+
+Key files:
+
+- `src/oilgas/parsers/revenue.py`
+- `src/oilgas/parsers/revenue_line.py`
+- `src/oilgas/parsers/product.py`
+- `src/oilgas/repositories/revenue.py`
+- `src/oilgas/models/revenue.py`
 
 ### JIB ETL
 
-* Phase 1 Highmark EnergyLink JIB ETL is implemented.
-* JIB parser ignores Statement of Account pages and parses Highmark `Operator Invoice - JIB` invoice packages.
-* Highmark JIB parsing captures:
-  * operator
-  * owner_number
-  * invoice_number
-  * invoice_date
-  * accounting_period
-  * invoice_total
-  * cost center summary rows
-  * cost center detail lines
-  * cost_class
-  * account_group
-  * op_account
-  * minor_account
-  * description
-  * vendor_name
-  * vendor_invoice
-  * activity_period
-  * partner_percent
-  * gross_amount
-  * invoiced_amount
-* JIB expenses are stored as positive expenses; credits/reversals retain source sign.
-* JIB duplicate detection skips by `operator_id + invoice_number`.
-* Statement-of-account-only or non-Highmark JIB PDFs return no invoice and are skipped by JIB ingest.
-* `oilgas jib parse` and `oilgas jib ingest` commands are available.
-* Generic `oilgas ingest` can classify and dispatch Highmark JIB PDFs.
-* Full Highmark JIB fixture directory currently imports successfully into a temporary DuckDB:
-  * 50 invoices
-  * 48,518 JIB detail lines
-  * total invoice amount equals total detail `invoiced_amount` across imported fixtures.
+- Phase 1 Highmark JIB parser/repository/schema implemented.
+- Parser skips leading `Statement of Account` pages and starts at `Operator Invoice - JIB` summary/detail data.
+- Captures invoice header, cost center summary rows, cost center detail rows, cost class/account group context, vendor metadata, gross amount, and invoiced amount.
+- Expenses are stored as positive `invoiced_amount`; credits/reversals keep source sign.
+- Duplicate detection skips by `operator_id + invoice_number`.
+- Generic `oilgas ingest` can classify and dispatch Highmark JIB PDFs.
+- Non-Highmark JIB samples currently return no invoice and are skipped.
 
-## Current Focus
+Key files:
 
-Stabilize JIB reporting and downstream analytics after Phase 1 Highmark JIB ingestion.
+- `src/oilgas/models/jib.py`
+- `src/oilgas/parsers/jib.py`
+- `src/oilgas/repositories/jib.py`
+- `sql/004_jib.sql`
+- `src/oilgas/cli.py`
+- `src/oilgas/classifier.py`
 
-## Remaining Work
+Validated Highmark fixture ingest into a temp DB:
 
-* Add SQL views for monthly cashflow:
-  * revenue owner net value
-  * JIB invoiced expense
-  * revenue minus JIB expense
-* Add JIB reporting views by:
-  * operator
-  * accounting_period
-  * cost_center
-  * vendor
-  * cost_class
-  * account_group
-* Add additional parser subclasses for non-Highmark JIB formats:
-  * Chevron sample in `data/raw/chevron/jib/`
-  * Finley sample in `data/raw/finley/jib/`
-* Decide whether existing databases need migration support or should be rebuilt from schema during early development.
-* Continue expanding regression fixtures as new JIB/revenue edge cases are discovered.
+- 50 invoices
+- 48,518 JIB detail lines
+- `sum(jib_invoice.invoice_total) == sum(jib_line.invoiced_amount) == 181042.71`
 
-## Instructions for Future Coding Agents
+### Reporting App MVP
 
-Before changing parser logic:
+- Local read-only Flask/Bokeh app is available through `uv run oilgas app`.
+- Uses direct read-only DuckDB SQL via `src/oilgas/web/reports.py`; no ORM.
+- Current pages: overview/cashflow, production history, price history, revenue audit, and JIB audit.
+- Filters are URL query parameters only (shareable, no persisted session state), including dates, operator, property, product, and cost center. Production reports include adjustments by default.
+- Net cashflow is rolled up only by month. Drilldown keeps revenue properties and JIB cost centers as separate records; no automatic matching or expense allocation is performed.
+- Audit rows link to the original PDF through `source_file.filepath`; raw PDFs must be present on the app machine.
+- Numeric table values are right-aligned and formatted with local thousands separators; missing/NaN values render as `--`. CSV and XLSX exports work. PNG/SVG Bokeh export and generated PDF report packages are not yet implemented.
+- The app binds to `127.0.0.1` by default and has no authentication.
 
-* preserve existing normalized field names
-* preserve deterministic parsing behavior
-* avoid replacing explicit rules with broad heuristics
-* add new edge cases by extending isolated detection/parsing helpers
-* keep validation strict for financial totals
-* treat correctness and auditability as more important than parser brevity
+## Current Focus / Next Steps
 
-When modifying JIB parsing:
+1. Add audit/export support, preferably Excel or CSV first:
+   - `revenue_lines`
+   - `revenue_check_totals`
+   - `jib_lines`
+   - `jib_invoice_totals`
+   - `jib_cost_center_totals`
+2. Add SQL reporting views:
+   - monthly revenue
+   - monthly JIB expense
+   - monthly cashflow: revenue minus JIB expense
+   - JIB expense by operator/cost center/vendor/cost class/account group
+3. Add simple schema migration support; currently old DBs may need rebuild after schema changes.
+4. Add parser support for non-Highmark JIB samples:
+   - `data/raw/finley/jib/`
+   - `data/raw/chevron/jib/`
+5. Continue adding narrow regression fixtures for parser edge cases.
 
-* keep Highmark parser behavior isolated from future Chevron/Finley parsers
-* do not map JIB cost centers to revenue properties
-* store JIB expenses as positive `invoiced_amount` values
-* preserve source signs for credits/reversals
-* fail on unrecognized financial detail rows unless there is explicit continuation handling
+## Agent Guidance
+
+- Prefer deterministic, explicit parser rules over broad heuristics.
+- Keep financial validation strict; fail ambiguous financial detail rows unless explicitly handled.
+- Preserve normalized field names and existing behavior unless intentionally changing it.
+- Keep Highmark JIB behavior isolated from future Chevron/Finley parsers.
+- Do not map JIB cost centers to revenue `property`; they are separate concepts.
+- Do not assume full-project Ruff is clean; targeted Ruff checks have passed for recently touched JIB files, but older files have existing lint issues.

@@ -2,167 +2,188 @@
 
 ## Objective
 
-Build a robust ETL pipeline that converts oil and gas accounting PDFs into normalized structured data suitable for DuckDB storage, validation, reporting, and Excel/Power Query analytics.
+Build a deterministic, auditable ETL pipeline that converts oil and gas accounting PDFs into normalized DuckDB data for validation, reporting, Excel/Power Query review, and future analytics.
 
-Current supported document families:
+Supported document families:
 
-* EnergyLink-style revenue statements
-* Highmark EnergyLink JIB invoice packages
+- EnergyLink-style revenue statements.
+- Highmark EnergyLink `Operator Invoice - JIB` packages.
 
-The parser should tolerate statement layout variation while producing deterministic, auditable records.
-
-## High-Level Pipeline
+## Pipeline
 
 ```text
 PDF
-  ↓
-Document extraction / OCR
-  ↓
-Token stream with coordinates
-  ↓
-Document-specific parser
-  ↓
-Normalized business models
-  ↓
-Validation
-  ↓
-DuckDB
-  ↓
-SQL views / Excel / analytics
+  -> PDFExtractor / layout analysis
+  -> DocumentClassifier
+  -> document-specific parser
+  -> Pydantic models
+  -> repository validation + duplicate detection
+  -> DuckDB tables/views
+  -> SQL / Excel / analytics
 ```
 
-## Core Design Principles
+Core commands:
 
-* Parsing should be deterministic.
-* Parsing rules should be explicit rather than heuristic whenever possible.
-* Intermediate parsed structures should be inspectable for debugging.
-* Preserve original source values whenever practical.
-* Normalize only after the parser has correctly identified semantic fields.
-* Financial imports should validate totals and fail loudly on ambiguous detail rows.
+```bash
+uv run oilgas init
+uv run oilgas ingest <path>
+uv run oilgas parse <pdf>
+uv run oilgas jib parse <pdf>
+uv run oilgas jib ingest <path>
+uv run pytest
+```
 
-## Revenue ETL
+## Design Principles
 
-Revenue parser output is organized as:
+- Deterministic parser rules are preferred over fuzzy heuristics.
+- Source layout is authoritative.
+- Preserve source signs/values where meaningful.
+- Store normalized business data, not raw coordinates/text, for now.
+- Validate financial totals and fail loudly on ambiguous detail rows.
+- Keep parser-specific behavior isolated by document/operator format.
+
+## Revenue Model
+
+Revenue output is conceptually:
 
 ```text
 RevenueStatement
-  → RevenueProperty
-    → RevenueProduct
-      → RevenueLine
+  -> RevenueProperty
+    -> RevenueProduct
+      -> RevenueLine
 ```
 
-Typical revenue line fields include:
+Important fields include check number/date/amount, operator, property, product, production period, owner/distribution interest, owner volume, deductions, and owner net value.
 
-* line_type
-* revenue_type
-* tax_deduct_code
-* production_period
-* property_volume
-* unit_price
-* property_net_value
-* owner_interest
-* distribution_interest
-* owner_volume
-* owner_net_value
+Important behavior:
 
-Important revenue behavior:
+- Duplicate detection uses `source_file.sha256` and existing statement linkage.
+- Page breaks can split property/product sections; parser builds property blocks across pages.
+- Bare continuation codes `TRN`, `MIS`, `TRT`, `GAT` merge into prior logical `SEV` or `MIS` rows.
+- Interest-qualified rows such as `WI TRN` are independent.
+- `JOINT INTEREST BILLING` can be a product heading.
 
-* Page-break-aware property parsing keeps property/product lines together across pages.
-* Continuation records are merged into their prior logical transaction and suppressed from final output.
-* Current bare continuation codes include `TRN`, `MIS`, `TRT`, and `GAT`.
-* Continuations can merge into prior `SEV` or `MIS` base rows.
+Revenue validation target:
 
-## JIB ETL
+```text
+sum(revenue_line.owner_net_value) == revenue_statement.check_amount
+```
 
-Phase 1 JIB support targets Highmark EnergyLink `Operator Invoice - JIB` packages.
+## JIB Model
 
-JIB parser output is organized as:
+Phase 1 JIB support targets Highmark only.
+
+JIB output is conceptually:
 
 ```text
 JIBInvoice
-  → JIBCostCenterSummary
-  → JIBLine
+  -> JIBCostCenterSummary
+  -> JIBLine
 ```
 
-Highmark JIB packages may begin with Statement of Account pages. These are skipped. The parser starts from the invoice summary page and then parses cost-center detail pages.
+Important invoice fields:
 
-JIB invoice fields include:
+- operator
+- owner_number
+- invoice_number
+- invoice_date
+- accounting_period
+- invoice_total
 
-* operator
-* owner_number
-* invoice_number
-* invoice_date
-* accounting_period
-* invoice_total
+Important cost center/detail fields:
 
-JIB cost center summary fields include:
+- cost_center_code
+- cost_center_name
+- afe
+- description
+- cost_class
+- account_group
+- op_account
+- minor_account
+- vendor_name
+- vendor_invoice
+- activity_period
+- partner_percent
+- gross_amount
+- invoiced_amount
 
-* cost_center_code
-* cost_center_name
-* afe
-* description
-* gross_amount
-* cash_call_amount
-* invoiced_amount
-* display_order
+Accounting conventions:
 
-JIB detail line fields include:
+- JIB expenses are stored positive in `invoiced_amount`.
+- Credits/reversals retain source sign.
+- JIB cost centers are not revenue properties and should not be inserted into `property`.
+- Cashflow reporting should compute revenue minus JIB expense.
 
-* cost_center_code
-* cost_center_name
-* afe
-* cost_class
-* account_group
-* op_account
-* minor_account
-* description
-* vendor_name
-* vendor_invoice
-* activity_period
-* partner_percent
-* gross_amount
-* invoiced_amount
-* display_order
-
-JIB accounting convention:
-
-* Expenses are stored as positive `invoiced_amount` values.
-* Credits/reversals retain their source sign.
-* Cashflow reporting should compute revenue minus JIB expense, e.g.:
+Duplicate JIB detection:
 
 ```text
-net_cashflow = revenue_owner_net_value - jib_invoiced_amount
+operator_id + invoice_number
 ```
 
-## DuckDB Storage
+JIB validation targets:
+
+- summary invoiced total equals invoice total.
+- detail invoiced total equals invoice total.
+- detail totals by cost center equal summary totals by cost center, after aggregating duplicate summary rows.
+
+## DuckDB Tables
 
 Important table groups:
 
-* `source_file`
-* `operator`
-* `revenue_statement`
-* `revenue_product`
-* `revenue_line`
-* `jib_invoice`
-* `jib_cost_center`
-* `jib_cost_center_summary`
-* `jib_line`
-* `vendor`
+- `source_file`
+- `operator`
+- `property`
+- `revenue_statement`
+- `revenue_product`
+- `revenue_line`
+- `jib_invoice`
+- `jib_cost_center`
+- `jib_cost_center_summary`
+- `jib_line`
+- `vendor`
 
-JIB cost centers are operator-specific and are not treated as revenue properties.
+Schema files are in `sql/`. There is no migration system yet; rebuilding the DB may be required after schema changes.
 
-## Validation Philosophy
+## Reporting App
 
-Revenue validation should compare statement check amount to summed line owner net values.
+The initial web MVP lives in `src/oilgas/web/` and is started with:
 
-JIB validation should compare:
+```bash
+uv run oilgas app
+```
 
-* sum of cost center summary `invoiced_amount` to invoice total
-* sum of detail line `invoiced_amount` to invoice total
-* sum of detail line `invoiced_amount` by cost center to summary totals by cost center
+Technology choices:
 
-## Parser Philosophy
+- Flask with server-rendered Jinja templates.
+- Bokeh embedded in Flask pages; no Bokeh server or external Plotly service.
+- Direct read-only DuckDB SQL in `ReportRepository`, not an ORM.
+- CSV/XLSX exports (`openpyxl`) of report data.
+- Source PDF route resolves the existing `source_file.filepath`; PDFs are not stored as DuckDB BLOBs.
 
-The parser should identify the semantic meaning of each line before attempting to merge or normalize records.
+Implemented reports/pages:
 
-Future parser improvements should extend existing rules and parser-specific helpers rather than replacing working behavior.
+- monthly revenue, JIB expense, and net cashflow;
+- production history using property gross and recorded owner fields;
+- simple-average source unit-price history, excluding non-positive price/volume values;
+- revenue and JIB detail audit tables with source PDF links.
+
+Cashflow is rolled up by month without property-to-JIB matching. Its drilldown shows revenue by operator/property and JIB expense by operator/cost center as separate records; no expense is allocated automatically.
+
+Future web work:
+
+- printable/PDF evidence packages and Bokeh PNG/SVG export;
+- trailing-12-month deficit dashboard for prudent-operator analysis;
+- authentication before non-local deployment;
+- prudent-operator deficit analysis by operator/property/cost center;
+
+## Testing / Coverage
+
+Relevant tests include revenue parser/repository/totals, JIB parser/repository, classifier, hashing, and parser model tests.
+
+Recently added coverage tests:
+
+- `tests/test_classifier.py`
+- `tests/test_hashing.py`
+- `tests/test_parser_model.py`
+
+Last known suite result: `29 passed`.

@@ -9,6 +9,7 @@ from oilgas.layout.rows import LayoutRow
 from oilgas.models.jib import JIBCostCenterSummary, JIBInvoice, JIBLine
 from oilgas.util.dates import parse_check_date, parse_production_period
 from oilgas.util.numbers import parse_decimal, require_decimal
+from oilgas.util.operators import canonical_operator_name
 
 MONEY_RE = r"(?:\(?-?\d[\d,]*\.\d{2}\)?)"
 MONTH_RE = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
@@ -146,7 +147,10 @@ class JIBParser:
         before_invoice = owner_operator_row.split("Invoice Number", 1)[0].strip()
         accounting_tokens = accounting_row.split() if accounting_row else []
         owner_number = accounting_tokens[0] if accounting_tokens else None
-        operator = self._parse_operator(before_invoice)
+        operator_source = (
+            accounting_row.split("Op Accounting Month", 1)[0] if accounting_row else ""
+        )
+        operator = self._parse_operator(operator_source) or self._parse_operator(before_invoice)
 
         if not owner_number:
             tokens = before_invoice.split()
@@ -354,12 +358,12 @@ class JIBParser:
         match = re.search(r"HIGHMARK ENERGY OPERATING,?\s+LLC", before_invoice)
 
         if match is not None:
-            return match.group(0).replace(",", "")
+            return canonical_operator_name(match.group(0))
 
         tokens = before_invoice.split()
 
         if len(tokens) > 1:
-            return " ".join(tokens[1:])
+            return canonical_operator_name(" ".join(tokens[1:]))
 
         return None
 

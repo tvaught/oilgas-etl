@@ -6,6 +6,7 @@ from uuid import UUID
 from oilgas.models.jib import JIBCostCenterSummary, JIBInvoice, JIBLine
 from oilgas.util.hashing import sha256
 from oilgas.util.ids import new_uuid
+from oilgas.util.operators import canonical_operator_name
 
 from .base import Repository
 
@@ -23,7 +24,7 @@ class JIBRepository(Repository):
         self,
         invoice: JIBInvoice,
     ) -> bool:
-        operator_id = self._operator_id(invoice.operator)
+        operator_id = self._operator_id(canonical_operator_name(invoice.operator))
 
         if operator_id is None:
             return False
@@ -39,7 +40,7 @@ class JIBRepository(Repository):
 
         try:
             source_file_id = self._insert_source_file(pdf)
-            operator_id = self._upsert_operator(invoice.operator)
+            operator_id = self._upsert_operator(canonical_operator_name(invoice.operator))
 
             if self._has_invoice(operator_id, invoice.invoice_number):
                 self._debug(f"Skipping already imported JIB invoice: {invoice.invoice_number}")

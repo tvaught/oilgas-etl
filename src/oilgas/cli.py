@@ -21,6 +21,7 @@ from oilgas.parsers.revenue import RevenueParser
 from oilgas.parsers.revenue_line import RevenueLineExtractor
 from oilgas.repositories.jib import JIBRepository
 from oilgas.repositories.revenue import RevenueRepository
+from oilgas.web import create_app
 
 console = Console()
 
@@ -64,6 +65,28 @@ def init_db():
     db.initialize()
     db.close()
     typer.echo("Database initialized()")
+
+
+@app.command("app")
+def web_app(
+    database: Path | None = typer.Option(  # noqa: B008
+        None, "--database", help="DuckDB database path."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
+    port: int = typer.Option(5000, "--port", help="Bind port."),
+) -> None:
+    """Start the read-only local reporting application."""
+    database_path = database or settings.database
+    if not database_path.is_file():
+        raise typer.BadParameter(
+            f"Database does not exist: {database_path}. Run 'oilgas init' and ingest PDFs first."
+        )
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        console.print(
+            "[yellow]Warning: this MVP has no authentication. "
+            "Do not expose it to untrusted networks.[/yellow]"
+        )
+    create_app(database_path).run(host=host, port=port, debug=False)
 
 
 @app.command("inspect")

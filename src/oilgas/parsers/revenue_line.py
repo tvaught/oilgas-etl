@@ -310,12 +310,15 @@ class RevenueLineExtractor:
         row: LayoutRow,
     ) -> ParsedRow:
 
-        parsed = ParsedRow()
-
         tokens = self._tokenize_row(row)
 
         if tokens[0].text == "DEDUCT" or tokens[0].text.startswith("DEDUCT "):
             return self._parse_chevron_deduct(tokens)
+
+        if self._is_xto_layout(tokens) or self._is_xto_deduction_layout(tokens):
+            return self._parse_xto_row(tokens)
+
+        parsed = ParsedRow()
 
         if self.debug:
             self._debug_tokens(tokens)
@@ -381,6 +384,54 @@ class RevenueLineExtractor:
             print(f"{name:24} : {field.text:15} (x={field.x:.1f})")
 
         print("-" * 72)
+
+    @staticmethod
+    def _is_xto_layout(tokens: list[ParsedField]) -> bool:
+        """Identify XTO's price/volume/value layout by its fixed source columns."""
+        numeric_tokens = tokens[2:]
+        return (
+            len(numeric_tokens) >= 8
+            and any(345 <= token.x <= 380 for token in numeric_tokens)
+            and any(445 <= token.x <= 475 for token in numeric_tokens)
+        )
+
+    @staticmethod
+    def _is_xto_deduction_layout(tokens: list[ParsedField]) -> bool:
+        """Identify XTO bare MIS/TRN rows whose value is an owner deduction."""
+        return (
+            tokens[0].text in {"MIS", "TRN", "TRT", "GAT"}
+            and any(195 <= token.x <= 215 for token in tokens[2:])
+            and any(505 <= token.x <= 525 for token in tokens[2:])
+            and any(695 <= token.x <= 730 for token in tokens[2:])
+        )
+
+    def _parse_xto_row(self, tokens: list[ParsedField]) -> ParsedRow:
+        """Map XTO's explicit owner/property columns without using generic centers."""
+        parsed = ParsedRow()
+        parsed.add(LINE_TYPE, tokens[0].text, tokens[0].x)
+        parsed.add(REVENUE_TYPE, tokens[0].text, tokens[0].x)
+        parsed.add(PRODUCTION_PERIOD, tokens[1].text, tokens[1].x)
+
+        columns = [
+            Column(OWNER_INTEREST, 204),
+            Column(DISTRIBUTION_INTEREST, 253),
+            Column(PROPERTY_VOLUME, 361),
+            Column(UNIT_PRICE, 412),
+            Column(PROPERTY_GROSS_VALUE, 460),
+            Column(PROPERTY_DEDUCTIONS, 517),
+            Column(PROPERTY_NET_VALUE, 562),
+            Column(OWNER_VOLUME, 618),
+            Column(OWNER_GROSS_VALUE, 663),
+            Column(OWNER_DEDUCTIONS, 712),
+            Column(OWNER_NET_VALUE, 758),
+        ]
+
+        for token in tokens[2:]:
+            column = min(columns, key=lambda candidate: abs(candidate.center_x - token.x))
+            parsed.add(column.name, token.text, token.x)
+
+        self._normalize_owner_net_value(parsed)
+        return parsed
 
     def _normalize_owner_net_value(
         self,

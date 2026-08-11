@@ -1,127 +1,117 @@
 # Known Parsing Edge Cases
 
-## Revenue: Continuation Transactions
+## Revenue
 
-A revenue tax/deduction/base row may be followed by one or more transaction rows that visually appear independent but are actually continuations.
+### Bare Continuation Transactions
 
-Known bare continuation transaction codes:
+Known bare continuation codes:
 
-* `TRN`
-* `MIS`
-* `TRT`
-* `GAT`
+- `TRN`
+- `MIS`
+- `TRT`
+- `GAT`
 
-These continuation lines:
+These are not independent rows when they lack an interest-qualified prefix such as `WI`, `RI`, or `OR`. They merge into the previous logical base row when the base row ends in:
 
-* have no meaningful independent interest-qualified prefix such as `WI`, `RI`, or `OR`
-* belong to the preceding logical transaction
-* should not become independent output records
+- `SEV`
+- `MIS`
 
-## Revenue Merge Rule
+Merge behavior:
 
-Continuation records should be merged into the previous base record.
+- add continuation `owner_net_value` to the base row.
+- preserve base row metadata.
+- suppress continuation row from final output.
 
-Current allowed base row final transaction codes:
+Interest-qualified rows such as `WI TRN` stay independent.
 
-* `SEV`
-* `MIS`
+### Owner Net Normalization
 
-Specifically:
+Some XTO/Chevron-style bare continuation or deduction rows place the only owner-level amount in a coordinate slot closer to `owner_volume` than `owner_net_value`.
 
-* add the continuation `owner_net_value`
-* preserve the original base transaction metadata
-* suppress the continuation record from final output
+Current parser normalizes `owner_volume` to `owner_net_value` when `owner_net_value` is missing for bare:
 
-Interest-qualified rows such as `WI TRN` are independent rows and should not be treated as continuations.
+- `TRN`
+- `MIS`
+- `TRT`
+- `GAT`
+- `DEDUCT`
 
-## Revenue Owner Net Normalization
+### Page Breaks
 
-Some XTO/Chevron-style bare continuation or deduction rows contain only an owner-level amount whose x-coordinate maps closer to `owner_volume` than `owner_net_value`.
+Revenue properties/products can continue across page breaks before the next `Property:` header. The parser builds property blocks across the document and skips repeated page furniture so top-of-page detail rows are not orphaned.
 
-Current parser behavior normalizes `owner_volume` to `owner_net_value` for bare:
+### Product Heading Ambiguity
 
-* `TRN`
-* `MIS`
-* `TRT`
-* `GAT`
-* `DEDUCT`
+`JOINT INTEREST BILLING` contains `INTEREST` but is a valid product heading on Highmark revenue statements. Keep explicit handling for it.
 
-when `owner_net_value` is otherwise missing.
+## JIB
 
-## Revenue Page Breaks
+### Statement of Account Pages
 
-Highmark revenue properties/products can continue across page breaks before the next `Property:` header. Revenue parsing now builds property blocks across the whole document and skips repeated page header/footer furniture.
+Highmark JIB packages may begin with `Statement of Account` pages listing outstanding invoices. These are ignored. Parsing begins at the first Highmark `Operator Invoice - JIB` invoice summary/detail page.
 
-This prevents top-of-page detail rows from being orphaned.
+Statement-of-account-only PDFs and unsupported non-Highmark JIB PDFs currently return no parsed invoice and are skipped.
 
-## Revenue Product Headings Containing INTEREST
+### Duplicate Cost Centers in Summary
 
-`JOINT INTEREST BILLING` can appear as a product heading on Highmark revenue statements. It must be recognized as a product heading even though it contains the word `INTEREST`.
+A summary can have multiple rows for the same cost center, for example one AFE-specific row plus one non-AFE row. Validation must aggregate summary rows by cost center before comparing to detail totals.
 
-## JIB: Statement of Account Pages
+### Repeated Detail Headers
 
-Highmark JIB PDFs may begin with `Statement of Account` pages listing outstanding invoices. These are not imported as JIB data.
+Highmark detail pages repeat headers such as:
 
-JIB parsing starts at the first Highmark `Operator Invoice - JIB` page with a cost center summary table.
+- `Statement`
+- `Partner Operator Invoice`
+- `Invoice Number ...`
+- `Op Accounting Month ...`
+- `Cost Center ...`
+- column headers
 
-Statement-of-account-only PDFs and non-Highmark JIB samples currently return no parsed invoice and are skipped by JIB ingest.
+The parser skips these rows. Repeated `Cost Center` headers for the same cost center should not reset pending vendor/detail continuation state.
 
-## JIB: Duplicate Cost Centers in Summary
+### Vendor and Description Continuations
 
-A Highmark JIB summary can contain multiple rows for the same cost center, for example:
-
-* one AFE-specific row
-* one non-AFE row for the same cost center
-
-Validation aggregates summaries by cost center before comparing against detail-line totals.
-
-## JIB: Detail Page Header Repetition
-
-Highmark JIB detail pages repeat header rows such as:
-
-* `Statement`
-* `Partner Operator Invoice`
-* `Invoice Number ...`
-* `Op Accounting Month ...`
-* `Cost Center ...`
-* column headers
-
-The detail parser skips these rows and preserves pending vendor/detail continuation state across repeated page headers.
-
-## JIB: Vendor Continuation Rows
-
-Highmark JIB detail rows can be followed by vendor metadata lines such as:
+Vendor metadata may appear after a detail row using `~` separators, e.g.:
 
 ```text
 JOE R. MAY OILFIELD PIPE & SUPPLY, LTD.~05-OI-693~~~~~~
 ```
 
-The parser stores:
+The parser stores `vendor_name` and `vendor_invoice` from these rows.
 
-* `vendor_name`
-* `vendor_invoice`
+Plain free-text continuation rows without `~` are appended to the prior line description.
 
-Some vendor/service notes continue as free text without `~`; these are appended to the prior line description.
+### Cost Class / Account Group Context
 
-## JIB: Cost Classes and Account Groups
+Highmark detail pages include context headings that apply to following lines until replaced.
 
-Highmark detail pages can include cost class headings such as:
+Known cost classes include:
 
-* `Capital`
-* `Expense`
-* `Leasehold`
+- `Capital`
+- `Expense`
+- `Leasehold`
 
-and account group headings such as:
+Known account group examples include:
 
-* `RWO-REMEDIAL WORKOVER`
-* `LOE-LEASE OPERATING EXPENSE`
-* `Lease Operating Expense`
-* `Plug and Abandon`
+- `RWO-REMEDIAL WORKOVER`
+- `LOE-LEASE OPERATING EXPENSE`
+- `Lease Operating Expense`
+- `Plug and Abandon`
 
-These are carried onto subsequent detail lines until replaced.
+### Unsupported Formats
 
-## Guiding Principle
+Finley and Chevron JIB samples exist in `data/raw/finley/jib/` and `data/raw/chevron/jib/`, but are not supported yet. Add separate parser logic rather than broadening Highmark rules.
 
-The source layout is authoritative.
+## Reporting: Property / Cost Center Rollups
 
-When uncertain, preserve deterministic behavior, fail on ambiguous financial rows, and add narrow edge-case handling rather than broad heuristics.
+Revenue properties and JIB cost centers are different source concepts. The reporting app does not match or allocate them. Cashflow is rolled up by month only; monthly drilldown shows independent revenue-property and JIB-cost-center records.
+
+Plant/general costs therefore remain visible as independent cost-center expenses.
+
+## Reporting: Source PDFs
+
+Audit links resolve `source_file.filepath`, which is an absolute ingestion-time path. If the reporting app is run on another machine, the raw PDF directory must be copied/synced to an equivalent available location or the link returns unavailable.
+
+## General Rule
+
+When uncertain, keep deterministic behavior, fail on ambiguous financial rows, and add narrow edge-case handling with tests rather than broad heuristics.

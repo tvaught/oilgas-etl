@@ -28,11 +28,11 @@ class RevenueLine(BaseModel):
 
     owner_gross_value: Decimal | None = None
     owner_deductions: Decimal | None = None
-    owner_net_value: Decimal
+    owner_net_value: Decimal | None = None
 
     @property
     def is_deduction(self) -> bool:
-        return self.owner_net_value < 0
+        return self.owner_net_value is not None and self.owner_net_value < 0
 
 
 class RevenueProduct(BaseModel):
@@ -47,7 +47,7 @@ class RevenueProduct(BaseModel):
     @property
     def total_owner_value(self) -> Decimal:
         return sum(
-            (line.owner_net_value for line in self.lines),
+            (line.owner_net_value or Decimal("0.00") for line in self.lines),
             start=Decimal("0.00"),
         )
 

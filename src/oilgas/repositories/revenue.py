@@ -6,6 +6,7 @@ from uuid import UUID
 from oilgas.models.revenue import RevenueLine, RevenueProduct, RevenueProperty, RevenueStatement
 from oilgas.util.hashing import sha256
 from oilgas.util.ids import new_uuid
+from oilgas.util.operators import canonical_operator_name
 
 from .base import Repository
 
@@ -55,7 +56,7 @@ class RevenueRepository(Repository):
                 self.connection.commit()
                 return False
 
-            operator_id = self._upsert_operator(statement.operator)
+            operator_id = self._upsert_operator(canonical_operator_name(statement.operator))
             statement_id = self._insert_statement(
                 source_file_id,
                 operator_id,

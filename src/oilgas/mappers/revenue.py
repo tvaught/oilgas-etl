@@ -19,7 +19,7 @@ from oilgas.parsers.property import (
     STATE,
 )
 from oilgas.util.dates import parse_production_period
-from oilgas.util.numbers import parse_decimal, require_decimal
+from oilgas.util.numbers import parse_decimal
 
 
 class RevenueMapper:
@@ -78,7 +78,7 @@ class RevenueMapper:
             owner_deductions=parse_decimal(
                 row.get("owner_deductions"),
             ),
-            owner_net_value=require_decimal(row.get("owner_net_value"), "owner_net_value"),
+            owner_net_value=parse_decimal(row.get("owner_net_value")),
         )
 
     #
