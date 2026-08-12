@@ -49,7 +49,7 @@ app_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 printf 'Updating Oil & Gas ETL in %s\n' "$app_dir"
 cd "$app_dir"
 
-run git pull --ff-only
+run git pull origin main --ff-only
 run uv sync --frozen
 run sudo chown -R travis:oilgas "$app_dir"
 run sudo chmod -R g+rX "$app_dir"

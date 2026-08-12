@@ -36,6 +36,26 @@ def test_protected_app_redirects_unauthenticated_requests(tmp_path, monkeypatch)
     assert response.headers["Location"].endswith("/login")
 
 
+def test_owner_revenue_route_and_csv_export_are_available(tmp_path, monkeypatch) -> None:
+    database_path = Path(tmp_path) / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    database.close()
+    monkeypatch.setenv("OILGAS_AUTH_REQUIRED", "false")
+
+    client = create_app(database_path).test_client()
+
+    page = client.get("/owner-revenue")
+    export = client.get("/export/owner_revenue.csv")
+
+    assert page.status_code == 200
+    assert b"Owner revenue by property and product" in page.data
+    assert b"Owner revenue" in page.data
+    assert export.status_code == 200
+    assert export.mimetype == "text/csv"
+    assert b"product_category" in export.data
+
+
 def test_google_callback_is_safe_when_authentication_is_disabled(tmp_path, monkeypatch) -> None:
     database_path = Path(tmp_path) / "oilgas.duckdb"
     database = Database(database_path)

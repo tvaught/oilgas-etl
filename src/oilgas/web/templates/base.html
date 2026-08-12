@@ -81,7 +81,7 @@
   {% block head %}{% endblock %}
 </head>
 <body>
-<header><div class="header-art" aria-hidden="true"><span></span></div><div class="site-header"><div class="brand"><h1>Oil &amp; Gas Reporting</h1><span>Read-only financial analysis</span>{% if current_user_name %}<div class="account"><span>{{ current_user_name }}</span><form method="post" action="/logout"><button type="submit">Sign out</button></form></div>{% endif %}</div><nav><a href="/">Overview</a><a href="/cashflow">Cashflow</a><a href="/production">Production</a><a href="/prices">Prices</a><a href="/audit/revenue">Revenue audit</a><a href="/audit/jib">JIB audit</a></nav></div></header>
+<header><div class="header-art" aria-hidden="true"><span></span></div><div class="site-header"><div class="brand"><h1>Oil &amp; Gas Reporting</h1><span>Read-only financial analysis</span>{% if current_user_name %}<div class="account"><span>{{ current_user_name }}</span><form method="post" action="/logout"><button type="submit">Sign out</button></form></div>{% endif %}</div><nav><a href="/">Overview</a><a href="/cashflow">Cashflow</a><a href="/owner-revenue">Owner revenue</a><a href="/production">Production</a><a href="/prices">Prices</a><a href="/audit/revenue">Revenue audit</a><a href="/audit/jib">JIB audit</a></nav></div></header>
 <main>{% block content %}{% endblock %}</main>
 </body>
 </html>

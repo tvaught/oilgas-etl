@@ -193,6 +193,23 @@ def create_app(database_path: Path | None = None) -> Flask:
             ),
         )
 
+    @app.get("/owner-revenue")
+    def owner_revenue():
+        filters = ReportFilters.from_request(request)
+        data = repository.owner_revenue_history(filters)
+        return render_report(
+            title="Owner revenue by property and product",
+            report_name="owner_revenue",
+            filters=filters,
+            data=data,
+            chart=None,
+            summary=_summary(data),
+            date_note=(
+                "Owner gross revenue, deductions, and net revenue are grouped by "
+                "property and product using the selected revenue date basis."
+            ),
+        )
+
     @app.get("/production")
     def production():
         filters = ReportFilters.from_request(request)
@@ -333,6 +350,7 @@ def _report_data(
         "cashflow_details": repository.cashflow_details,
         "production": repository.production_history,
         "prices": repository.price_history,
+        "owner_revenue": repository.owner_revenue_history,
         "revenue_lines": repository.revenue_lines,
         "jib_lines": repository.jib_lines,
     }
@@ -368,7 +386,16 @@ def _numeric_columns(data: pd.DataFrame) -> set[str]:
 
 def _summary(data: pd.DataFrame) -> dict[str, str]:
     totals: dict[str, str] = {"rows": f"{len(data):,}"}
-    for column in ("revenue_net", "jib_expense", "net_cashflow", "property_volume", "owner_volume"):
+    for column in (
+        "revenue_net",
+        "jib_expense",
+        "net_cashflow",
+        "property_volume",
+        "owner_volume",
+        "owner_gross_value",
+        "owner_deductions",
+        "owner_net_value",
+    ):
         if column in data:
             totals[column.replace("_", " ")] = f"{data[column].fillna(0).sum():,.2f}"
     return totals

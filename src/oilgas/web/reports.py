@@ -223,6 +223,37 @@ class ReportRepository:
         """
         return self.dataframe(sql, params)
 
+    def owner_revenue_history(self, filters: ReportFilters) -> pd.DataFrame:
+        """Monthly owner revenue by property and source product."""
+        date_column = self._revenue_date(filters.revenue_date_basis)
+        where, params = self._revenue_filters(filters, date_column)
+        sql = f"""
+            SELECT
+                date_trunc('month', {date_column})::DATE AS report_month,
+                o.operator_name,
+                p.property_name,
+                p.property_code,
+                CASE rp.product
+                    WHEN 'GAS SALES' THEN 'Gas'
+                    WHEN 'NATURAL GAS LIQUIDS' THEN 'NGL'
+                    WHEN 'OIL' THEN 'Oil'
+                    ELSE rp.product
+                END AS product_category,
+                rp.product AS source_product,
+                SUM(rl.owner_gross_value) AS owner_gross_value,
+                SUM(rl.owner_deductions) AS owner_deductions,
+                SUM(rl.owner_net_value) AS owner_net_value
+            FROM revenue_line AS rl
+            JOIN revenue_statement AS rs ON rs.statement_id = rl.statement_id
+            JOIN operator AS o ON o.operator_id = rs.operator_id
+            JOIN property AS p ON p.property_id = rl.property_id
+            JOIN revenue_product AS rp ON rp.product_id = rl.product_id
+            WHERE {where}
+            GROUP BY 1, 2, 3, 4, 5, 6
+            ORDER BY 1 DESC, 2, 3, 5, 6
+        """
+        return self.dataframe(sql, params)
+
     def revenue_lines(self, filters: ReportFilters) -> pd.DataFrame:
         date_column = self._revenue_date(filters.revenue_date_basis)
         where, params = self._revenue_filters(filters, date_column)

@@ -1,6 +1,9 @@
 from datetime import date
+from decimal import Decimal
 
 from oilgas.database import Database
+from oilgas.models.revenue import RevenueLine, RevenueProduct, RevenueProperty, RevenueStatement
+from oilgas.repositories.revenue import RevenueRepository
 from oilgas.web.filters import ReportFilters
 from oilgas.web.reports import ReportRepository
 
@@ -154,3 +157,68 @@ def test_product_filter_excludes_unfiltered_jib_expenses(tmp_path) -> None:
     assert details["record_type"].tolist() == ["revenue"]
     assert details.iloc[0]["revenue_net"] == 150
     assert details.iloc[0]["jib_expense"] == 0
+
+
+def test_owner_revenue_history_breaks_out_product_categories_and_properties(tmp_path) -> None:
+    database_path = tmp_path / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    try:
+        repository = RevenueRepository(database.connection)
+        products = (
+            ("GAS SALES", "Gas", "North Well", "P-1", "100.00", "-10.00", "90.00"),
+            ("NATURAL GAS LIQUIDS", "NGL", "North Well", "P-1", "50.00", "-5.00", "45.00"),
+            ("OIL", "Oil", "South Well", "P-2", "200.00", "-20.00", "180.00"),
+        )
+        for index, (product, _, property_name, property_code, gross, deductions, net) in enumerate(
+            products, start=1
+        ):
+            pdf = tmp_path / f"statement-{index}.pdf"
+            pdf.write_bytes(product.encode())
+            line = RevenueLine(
+                line_type="WI",
+                revenue_type="SEV",
+                production_period=date(2026, 6, 1),
+                owner_gross_value=Decimal(gross),
+                owner_deductions=Decimal(deductions),
+                owner_net_value=Decimal(net),
+            )
+            statement = RevenueStatement(
+                operator="Test Operator",
+                owner_number="OWNER-1",
+                check_number=f"CHECK-{index}",
+                check_date=date(2026, 7, 1),
+                check_amount=Decimal(net),
+                properties=[
+                    RevenueProperty(
+                        property_code=property_code,
+                        property_name=property_name,
+                        county="Test",
+                        state="TX",
+                        products=[RevenueProduct(product=product, lines=[line])],
+                    )
+                ],
+            )
+            assert repository.insert(pdf, statement)
+    finally:
+        database.close()
+
+    report = ReportRepository(database_path)
+    data = report.owner_revenue_history(ReportFilters())
+
+    assert data[
+        [
+            "product_category",
+            "property_name",
+            "owner_gross_value",
+            "owner_deductions",
+            "owner_net_value",
+        ]
+    ].values.tolist() == [
+        ["Gas", "North Well", 100.0, -10.0, 90.0],
+        ["NGL", "North Well", 50.0, -5.0, 45.0],
+        ["Oil", "South Well", 200.0, -20.0, 180.0],
+    ]
+    assert report.owner_revenue_history(ReportFilters(products=("OIL",)))[
+        "product_category"
+    ].tolist() == ["Oil"]
