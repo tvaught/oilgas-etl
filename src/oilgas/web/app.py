@@ -193,6 +193,42 @@ def create_app(database_path: Path | None = None) -> Flask:
             ),
         )
 
+    @app.get("/properties")
+    def property_list():
+        filters = ReportFilters.from_request(request)
+        data = repository.property_list(filters)
+        return render_report(
+            title="Property list and reported ownership",
+            report_name="property_list",
+            filters=filters,
+            data=data,
+            chart=None,
+            summary=_summary(data),
+            date_note=(
+                "Ownership and distribution decimals are the latest valid values reported "
+                "in the selected period. A changed status means more than one decimal pair "
+                "was observed and should be reviewed in the revenue audit."
+            ),
+        )
+
+    @app.get("/revenue/reconciliation")
+    def revenue_reconciliation():
+        filters = ReportFilters.from_request(request)
+        data = repository.revenue_reconciliation(filters)
+        return render_report(
+            title="Monthly revenue reconciliation",
+            report_name="revenue_reconciliation",
+            filters=filters,
+            data=data,
+            chart=None,
+            summary=_summary(data),
+            date_note=(
+                "Check-month totals include payable income, taxes, deductions, and "
+                "adjustments. Detail-only deductions have no source owner-net value, "
+                "so they remain informational and are excluded from the check variance."
+            ),
+        )
+
     @app.get("/owner-revenue")
     def owner_revenue():
         filters = ReportFilters.from_request(request)
@@ -351,6 +387,8 @@ def _report_data(
         "production": repository.production_history,
         "prices": repository.price_history,
         "owner_revenue": repository.owner_revenue_history,
+        "property_list": repository.property_list,
+        "revenue_reconciliation": repository.revenue_reconciliation,
         "revenue_lines": repository.revenue_lines,
         "jib_lines": repository.jib_lines,
     }
@@ -395,6 +433,14 @@ def _summary(data: pd.DataFrame) -> dict[str, str]:
         "owner_gross_value",
         "owner_deductions",
         "owner_net_value",
+        "check_amount",
+        "income_net",
+        "tax_net",
+        "deduction_net",
+        "adjustment_net",
+        "reported_net",
+        "check_variance",
+        "detail_only_deductions",
     ):
         if column in data:
             totals[column.replace("_", " ")] = f"{data[column].fillna(0).sum():,.2f}"

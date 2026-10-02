@@ -223,6 +223,208 @@ class ReportRepository:
         """
         return self.dataframe(sql, params)
 
+    def property_list(self, filters: ReportFilters) -> pd.DataFrame:
+        """Latest reported ownership decimals per revenue property, with change indicators."""
+        date_column = self._revenue_date(filters.revenue_date_basis)
+        where, params = self._revenue_filters(filters, date_column)
+        sql = f"""
+            WITH ownership_rows AS (
+                SELECT
+                    o.operator_name,
+                    p.property_name,
+                    p.property_code,
+                    p.county,
+                    p.state,
+                    p.api_number,
+                    {date_column}::DATE AS observation_date,
+                    rl.owner_interest,
+                    rl.distribution_interest,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY p.property_id
+                        ORDER BY {date_column} DESC, rs.check_date DESC, rl.line_id
+                    ) AS recency_rank
+                FROM revenue_line AS rl
+                JOIN revenue_statement AS rs ON rs.statement_id = rl.statement_id
+                JOIN operator AS o ON o.operator_id = rs.operator_id
+                JOIN property AS p ON p.property_id = rl.property_id
+                JOIN revenue_product AS rp ON rp.product_id = rl.product_id
+                WHERE {where}
+                  AND rl.owner_interest IS NOT NULL
+                  AND rl.distribution_interest IS NOT NULL
+                  AND rl.owner_interest BETWEEN 0 AND 1
+                  AND rl.distribution_interest BETWEEN 0 AND 1
+            ),
+            ownership_summary AS (
+                SELECT
+                    operator_name,
+                    property_name,
+                    property_code,
+                    county,
+                    state,
+                    api_number,
+                    MIN(observation_date) AS first_observation_date,
+                    MAX(observation_date) AS latest_observation_date,
+                    COUNT(DISTINCT (owner_interest, distribution_interest))
+                        AS ownership_decimal_count
+                FROM ownership_rows
+                GROUP BY 1, 2, 3, 4, 5, 6
+            )
+            SELECT
+                summary.operator_name,
+                summary.property_name,
+                summary.property_code,
+                summary.county,
+                summary.state,
+                summary.api_number,
+                latest.owner_interest AS owner_interest,
+                latest.distribution_interest AS distribution_interest,
+                summary.first_observation_date,
+                summary.latest_observation_date,
+                summary.ownership_decimal_count,
+                CASE
+                    WHEN summary.ownership_decimal_count = 1 THEN 'consistent'
+                    ELSE 'changed'
+                END AS ownership_status
+            FROM ownership_summary AS summary
+            JOIN ownership_rows AS latest
+                ON latest.property_code = summary.property_code
+               AND latest.recency_rank = 1
+            ORDER BY summary.operator_name, summary.property_name, summary.property_code
+        """
+        return self.dataframe(sql, params)
+
+    def revenue_reconciliation(self, filters: ReportFilters) -> pd.DataFrame:
+        """Monthly check-month revenue reconciliation, including all source costs."""
+        where, params = self._revenue_filters(filters, "rs.check_date")
+        sql = f"""
+            WITH filtered_lines AS (
+                SELECT
+                    rl.statement_id,
+                    rl.line_type,
+                    rl.owner_deductions,
+                    rl.owner_net_value
+                FROM revenue_line AS rl
+                JOIN revenue_statement AS rs ON rs.statement_id = rl.statement_id
+                JOIN operator AS o ON o.operator_id = rs.operator_id
+                JOIN property AS p ON p.property_id = rl.property_id
+                JOIN revenue_product AS rp ON rp.product_id = rl.product_id
+                WHERE {where}
+            ),
+            line_totals AS (
+                SELECT
+                    statement_id,
+                    SUM(
+                        CASE
+                            WHEN line_type IN (
+                                'SEVERANCE TAX', 'TEXAS SEVERANCE TAX', 'PRODUCTION TAX'
+                            ) THEN COALESCE(owner_net_value, 0)
+                            ELSE 0
+                        END
+                    ) AS tax_net,
+                    SUM(
+                        CASE
+                            WHEN line_type IN (
+                                'TRANSPORTATION', 'MARKETING', 'MARKETING CHARGES',
+                                'OTHER DEDUCTIONS'
+                            ) THEN COALESCE(owner_net_value, 0)
+                            ELSE 0
+                        END
+                    ) AS deduction_net,
+                    SUM(
+                        CASE
+                            WHEN line_type IN (
+                                'WORKING INTEREST', 'ROYALTY INTEREST', 'OVERRIDE INTEREST',
+                                'OVERRIDING ROYALTY', 'OVERRIDING ROYALTY INTEREST', 'WI SEV'
+                            ) OR line_type LIKE 'WI 0.%'
+                            THEN COALESCE(owner_net_value, 0)
+                            ELSE 0
+                        END
+                    ) AS income_net,
+                    SUM(
+                        CASE
+                            WHEN line_type NOT IN (
+                                'SEVERANCE TAX', 'TEXAS SEVERANCE TAX', 'PRODUCTION TAX',
+                                'TRANSPORTATION', 'MARKETING', 'MARKETING CHARGES',
+                                'OTHER DEDUCTIONS', 'WORKING INTEREST', 'ROYALTY INTEREST',
+                                'OVERRIDE INTEREST', 'OVERRIDING ROYALTY',
+                                'OVERRIDING ROYALTY INTEREST', 'WI SEV'
+                            ) AND line_type NOT LIKE 'WI 0.%'
+                            THEN COALESCE(owner_net_value, 0)
+                            ELSE 0
+                        END
+                    ) AS adjustment_net,
+                    SUM(
+                        CASE
+                            WHEN owner_net_value IS NULL THEN COALESCE(owner_deductions, 0)
+                            ELSE 0
+                        END
+                    ) AS detail_only_deductions,
+                    COUNT(
+                        CASE
+                            WHEN owner_net_value IS NULL AND owner_deductions IS NOT NULL THEN 1
+                        END
+                    ) AS detail_only_deduction_line_count,
+                    COUNT(
+                        CASE
+                            WHEN line_type NOT IN (
+                                'SEVERANCE TAX', 'TEXAS SEVERANCE TAX', 'PRODUCTION TAX',
+                                'TRANSPORTATION', 'MARKETING', 'MARKETING CHARGES',
+                                'OTHER DEDUCTIONS', 'WORKING INTEREST', 'ROYALTY INTEREST',
+                                'OVERRIDE INTEREST', 'OVERRIDING ROYALTY',
+                                'OVERRIDING ROYALTY INTEREST', 'WI SEV'
+                            ) AND line_type NOT LIKE 'WI 0.%'
+                            THEN 1
+                        END
+                    ) AS adjustment_line_count
+                FROM filtered_lines
+                GROUP BY statement_id
+            ),
+            statement_totals AS (
+                SELECT
+                    rs.statement_id,
+                    date_trunc('month', rs.check_date)::DATE AS report_month,
+                    o.operator_name,
+                    rs.owner_number,
+                    rs.check_amount,
+                    lt.income_net,
+                    lt.tax_net,
+                    lt.deduction_net,
+                    lt.adjustment_net,
+                    lt.detail_only_deductions,
+                    lt.detail_only_deduction_line_count,
+                    lt.adjustment_line_count
+                FROM revenue_statement AS rs
+                JOIN operator AS o ON o.operator_id = rs.operator_id
+                JOIN line_totals AS lt ON lt.statement_id = rs.statement_id
+            )
+            SELECT
+                report_month,
+                operator_name,
+                owner_number,
+                COUNT(*) AS statement_count,
+                SUM(check_amount) AS check_amount,
+                SUM(income_net) AS income_net,
+                SUM(tax_net) AS tax_net,
+                SUM(deduction_net) AS deduction_net,
+                SUM(adjustment_net) AS adjustment_net,
+                SUM(income_net + tax_net + deduction_net + adjustment_net) AS reported_net,
+                SUM(check_amount - (income_net + tax_net + deduction_net + adjustment_net))
+                    AS check_variance,
+                SUM(detail_only_deductions) AS detail_only_deductions,
+                SUM(detail_only_deduction_line_count) AS detail_only_deduction_line_count,
+                SUM(adjustment_line_count) AS adjustment_line_count,
+                CASE
+                    WHEN ABS(SUM(check_amount - (
+                        income_net + tax_net + deduction_net + adjustment_net
+                    ))) <= 0.01 THEN 'reconciled'
+                    ELSE 'variance'
+                END AS reconciliation_status
+            FROM statement_totals
+            GROUP BY 1, 2, 3
+            ORDER BY 1 DESC, 2, 3
+        """
+        return self.dataframe(sql, params)
+
     def owner_revenue_history(self, filters: ReportFilters) -> pd.DataFrame:
         """Monthly owner revenue by property and source product."""
         date_column = self._revenue_date(filters.revenue_date_basis)

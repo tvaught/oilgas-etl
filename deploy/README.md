@@ -64,6 +64,33 @@ The service expects these host paths:
 
 Sync the DuckDB database and matching raw source PDFs before starting the service. The app serves PDFs from the absolute source paths persisted at ingestion time, so ingest on `openhollow` using `/srv/oilgas/data/raw/`, or update the stored paths during the data migration.
 
+## Refreshing reporting data
+
+Sync new PDFs into the matching production raw archive first, then use the committed
+helper rather than calling `oilgas ingest` directly. It always targets the production
+DuckDB database, stops the web service to avoid a concurrent DuckDB writer, and restarts
+the service even if ingestion fails:
+
+```bash
+cd /srv/oilgas/app
+./deploy/ingest.sh /srv/oilgas/data/raw/highmark/jib
+# or ingest every new PDF in the complete archive tree:
+./deploy/ingest.sh /srv/oilgas/data/raw/
+# or target a single revenue archive:
+./deploy/ingest.sh /srv/oilgas/data/raw/xto/revenue
+```
+
+Use `--debug` only when investigating a parser issue:
+
+```bash
+./deploy/ingest.sh --debug /srv/oilgas/data/raw/highmark/jib
+```
+
+The helper accepts only `/srv/oilgas/data/raw/` or paths under it. Directory inputs
+are scanned recursively; existing revenue PDFs and JIB invoices are skipped by their
+normal duplicate protections. The helper does not initialize, replace, or migrate the
+production database.
+
 ## Updating application code
 
 As `travis`:

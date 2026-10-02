@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import typer
@@ -44,6 +45,14 @@ def main():
     pass
 
 
+def _pdf_files(source: Path) -> list[Path]:
+    if source.is_file():
+        return [source]
+    return sorted(
+        path for path in source.rglob("*") if path.is_file() and path.suffix.casefold() == ".pdf"
+    )
+
+
 def property_blocks(
     document,
 ) -> list[DocumentBlock]:
@@ -73,7 +82,7 @@ def web_app(
         None, "--database", help="DuckDB database path."
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
-    port: int = typer.Option(5000, "--port", help="Bind port."),
+    port: int = typer.Option(5000, "--port", help="Bind port (for example, --port 5001)."),
 ) -> None:
     """Start the read-only local reporting application."""
     database_path = database or settings.database
@@ -86,6 +95,18 @@ def web_app(
             "[yellow]Warning: this MVP has no authentication. "
             "Do not expose it to untrusted networks.[/yellow]"
         )
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            raise typer.BadParameter(
+                f"Port {port} is already in use. Stop the existing server or run "
+                f"'oilgas app --port {port + 1}'."
+            )
+    except ConnectionRefusedError:
+        pass
+    except socket.gaierror as error:
+        raise typer.BadParameter(f"Could not resolve bind host: {host}") from error
+
+    console.print(f"[bold cyan]Starting reporting app at http://{host}:{port}[/bold cyan]")
     create_app(database_path).run(host=host, port=port, debug=False)
 
 
@@ -366,7 +387,7 @@ def jib_ingest(
     if not source.exists():
         raise typer.BadParameter(f"{source} does not exist.")
 
-    files = sorted(source.glob("*.pdf")) if source.is_dir() else [source]
+    files = _pdf_files(source)
     console.print(f"[bold cyan]Importing {len(files)} JIB PDF(s)...[/bold cyan]")
 
     with Database(database_path) as db:
@@ -419,10 +440,7 @@ def ingest(
     if not source.exists():
         raise typer.BadParameter(f"{source} does not exist.")
 
-    if source.is_dir():
-        files = sorted(source.glob("*.pdf"))
-    else:
-        files = [source]
+    files = _pdf_files(source)
 
     console.print(f"[bold cyan]Importing {len(files)} PDF(s)...[/bold cyan]")
 

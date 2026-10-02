@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from oilgas.database import Database
 from oilgas.models.revenue import RevenueLine, RevenueProduct, RevenueProperty, RevenueStatement
 from oilgas.repositories.revenue import RevenueRepository
@@ -222,3 +224,134 @@ def test_owner_revenue_history_breaks_out_product_categories_and_properties(tmp_
     assert report.owner_revenue_history(ReportFilters(products=("OIL",)))[
         "product_category"
     ].tolist() == ["Oil"]
+
+
+def test_property_list_uses_latest_valid_ownership_decimals_and_flags_changes(tmp_path) -> None:
+    database_path = tmp_path / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    try:
+        repository = RevenueRepository(database.connection)
+        for index, (check_date, owner_interest, distribution_interest) in enumerate(
+            [
+                (date(2026, 1, 15), "0.12500000", "0.10000000"),
+                (date(2026, 2, 15), "0.15000000", "0.12000000"),
+            ],
+            start=1,
+        ):
+            pdf = tmp_path / f"ownership-{index}.pdf"
+            pdf.write_bytes(str(index).encode())
+            statement = RevenueStatement(
+                operator="Test Operator",
+                owner_number="OWNER-1",
+                check_number=f"OWNERSHIP-{index}",
+                check_date=check_date,
+                check_amount=Decimal("100.00"),
+                properties=[
+                    RevenueProperty(
+                        property_code="P-1",
+                        property_name="Test Well",
+                        county="Test",
+                        state="TX",
+                        products=[
+                            RevenueProduct(
+                                product="OIL",
+                                lines=[
+                                    RevenueLine(
+                                        line_type="WORKING INTEREST",
+                                        revenue_type="WORKING INTEREST",
+                                        production_period=check_date.replace(day=1),
+                                        owner_interest=Decimal(owner_interest),
+                                        distribution_interest=Decimal(distribution_interest),
+                                        owner_net_value=Decimal("100.00"),
+                                    )
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+            assert repository.insert(pdf, statement)
+    finally:
+        database.close()
+
+    data = ReportRepository(database_path).property_list(ReportFilters())
+
+    assert len(data) == 1
+    row = data.iloc[0]
+    assert row["owner_interest"] == pytest.approx(0.15)
+    assert row["distribution_interest"] == pytest.approx(0.12)
+    assert row["first_observation_date"].date() == date(2026, 1, 1)
+    assert row["latest_observation_date"].date() == date(2026, 2, 1)
+    assert row["ownership_decimal_count"] == 2
+    assert row["ownership_status"] == "changed"
+
+
+def test_monthly_revenue_reconciliation_includes_costs_without_double_counting_details(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    try:
+        repository = RevenueRepository(database.connection)
+        primary_lines = [
+            ("WORKING INTEREST", "120.00", None),
+            ("PRODUCTION TAX", "-10.00", None),
+            ("TRANSPORTATION", "-5.00", None),
+            ("CORRECTION", "-2.00", None),
+            ("TRN", None, "-3.00"),
+        ]
+        for index, (line_type, net, deductions) in enumerate(primary_lines, start=1):
+            pdf = tmp_path / f"primary-{index}.pdf"
+            pdf.write_bytes(line_type.encode())
+            statement = RevenueStatement(
+                operator="Test Operator",
+                owner_number="OWNER-1",
+                check_number=f"PRIMARY-{index}",
+                check_date=date(2026, 7, 1),
+                check_amount=Decimal(net or "0.00"),
+                properties=[
+                    RevenueProperty(
+                        property_code=f"P-{index}",
+                        property_name=f"Test Well {index}",
+                        county="Test",
+                        state="TX",
+                        products=[
+                            RevenueProduct(
+                                product="OIL",
+                                lines=[
+                                    RevenueLine(
+                                        line_type=line_type,
+                                        revenue_type=line_type,
+                                        production_period=date(2026, 6, 1),
+                                        owner_deductions=(
+                                            Decimal(deductions) if deductions is not None else None
+                                        ),
+                                        owner_net_value=Decimal(net) if net is not None else None,
+                                    )
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+            assert repository.insert(pdf, statement)
+    finally:
+        database.close()
+
+    data = ReportRepository(database_path).revenue_reconciliation(ReportFilters())
+
+    assert len(data) == 1
+    row = data.iloc[0]
+    assert row["statement_count"] == 5
+    assert row["check_amount"] == Decimal("103.00")
+    assert row["income_net"] == Decimal("120.00")
+    assert row["tax_net"] == Decimal("-10.00")
+    assert row["deduction_net"] == Decimal("-5.00")
+    assert row["adjustment_net"] == Decimal("-2.00")
+    assert row["reported_net"] == Decimal("103.00")
+    assert row["check_variance"] == Decimal("0.00")
+    assert row["detail_only_deductions"] == Decimal("-3.00")
+    assert row["detail_only_deduction_line_count"] == 1
+    assert row["reconciliation_status"] == "reconciled"

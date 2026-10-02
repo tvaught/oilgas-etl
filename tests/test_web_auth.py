@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import pytest
+import typer
 
+from oilgas.cli import web_app
 from oilgas.database import Database
 from oilgas.web import create_app
 from oilgas.web.auth import authentication_settings
@@ -34,6 +36,47 @@ def test_protected_app_redirects_unauthenticated_requests(tmp_path, monkeypatch)
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/login")
+
+
+def test_app_command_reports_an_occupied_port_before_starting_flask(tmp_path, monkeypatch) -> None:
+    database_path = Path(tmp_path) / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    database.close()
+
+    class ConnectedSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(
+        "oilgas.cli.socket.create_connection", lambda *args, **kwargs: ConnectedSocket()
+    )
+
+    with pytest.raises(typer.BadParameter, match="Port 5000 is already in use"):
+        web_app(database=database_path, host="127.0.0.1", port=5000)
+
+
+def test_property_list_route_and_csv_export_are_available(tmp_path, monkeypatch) -> None:
+    database_path = Path(tmp_path) / "oilgas.duckdb"
+    database = Database(database_path)
+    database.initialize()
+    database.close()
+    monkeypatch.setenv("OILGAS_AUTH_REQUIRED", "false")
+
+    client = create_app(database_path).test_client()
+
+    page = client.get("/properties")
+    export = client.get("/export/property_list.csv")
+
+    assert page.status_code == 200
+    assert b"Property list and reported ownership" in page.data
+    assert b"Properties" in page.data
+    assert export.status_code == 200
+    assert export.mimetype == "text/csv"
+    assert b"owner_interest" in export.data
 
 
 def test_owner_revenue_route_and_csv_export_are_available(tmp_path, monkeypatch) -> None:
