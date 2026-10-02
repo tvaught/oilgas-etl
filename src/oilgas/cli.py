@@ -26,6 +26,8 @@ from oilgas.web import create_app
 
 console = Console()
 
+SUPPORTED_REVENUE_TYPES = frozenset({DocumentType.HIGHMARK_REVENUE, DocumentType.XTO_REVENUE})
+
 app = typer.Typer(
     help="Oil & Gas ETL",
     no_args_is_help=True,
@@ -51,6 +53,10 @@ def _pdf_files(source: Path) -> list[Path]:
     return sorted(
         path for path in source.rglob("*") if path.is_file() and path.suffix.casefold() == ".pdf"
     )
+
+
+def _is_supported_document_type(document_type: DocumentType) -> bool:
+    return document_type == DocumentType.HIGHMARK_JIB or document_type in SUPPORTED_REVENUE_TYPES
 
 
 def property_blocks(
@@ -432,7 +438,7 @@ def ingest(
     ),
 ) -> None:
     """
-    Parse one or more revenue statements and persist them.
+    Parse supported revenue statements and Highmark JIB invoices and persist them.
     """
 
     database_path = database or settings.database
@@ -464,6 +470,13 @@ def ingest(
                 document = PDFExtractor.load(file)
                 document_type = DocumentClassifier.classify(document)
 
+                if not _is_supported_document_type(document_type):
+                    progress.console.print(
+                        f"↷ skipped unsupported {document_type.value.lower()} document: {file.name}"
+                    )
+                    progress.advance(task)
+                    continue
+
                 if document_type == DocumentType.HIGHMARK_JIB:
                     invoice = JIBParser(debug=debug).parse(document, file.name)
 
@@ -479,7 +492,7 @@ def ingest(
                         progress.advance(task)
                         continue
 
-                    statement = RevenueParser(debug=debug).parse(document, source)
+                    statement = RevenueParser(debug=debug).parse(document, str(file))
                     inserted = revenue_repo.insert(file, statement)
 
                 if inserted:
