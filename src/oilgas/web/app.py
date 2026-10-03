@@ -156,7 +156,10 @@ def create_app(database_path: Path | None = None) -> Flask:
             data=data,
             chart=_cashflow_chart(data, cumulative=filters.cumulative, rollup=filters.rollup),
             summary=summary,
-            date_note="Revenue and JIB date bases are independently selectable.",
+            date_note=(
+                "Revenue and JIB date bases are independently selectable. JIB netting-well "
+                "revenue is excluded from cashflow to prevent double counting JIB activity."
+            ),
         )
 
     @app.get("/cashflow")
@@ -171,8 +174,9 @@ def create_app(database_path: Path | None = None) -> Flask:
             chart=_cashflow_chart(data, cumulative=filters.cumulative, rollup=filters.rollup),
             summary=_summary(data),
             date_note=(
-                "Monthly totals are unallocated. Select a month to drill into "
-                "revenue properties and JIB cost centers."
+                "Monthly totals are unallocated and exclude JIB netting-well revenue to "
+                "prevent double counting. Select a month to drill into revenue properties "
+                "and JIB cost centers."
             ),
         )
 
@@ -188,8 +192,9 @@ def create_app(database_path: Path | None = None) -> Flask:
             chart=None,
             summary=_summary(data),
             date_note=(
-                "Revenue properties and JIB cost centers are shown independently; "
-                "no expense allocation is applied."
+                "Revenue properties and JIB cost centers are shown independently; no "
+                "expense allocation is applied. JIB netting-well revenue is excluded from "
+                "cashflow to prevent double counting."
             ),
         )
 
@@ -241,8 +246,9 @@ def create_app(database_path: Path | None = None) -> Flask:
             chart=None,
             summary=_summary(data),
             date_note=(
-                "Owner gross revenue, deductions, and net revenue are grouped by "
-                "property and product using the selected revenue date basis."
+                "Payable owner gross revenue and deductions are derived to reconcile "
+                "exactly to source owner net revenue. Detail-only source deductions have "
+                "no owner-net value and are shown separately."
             ),
         )
 
@@ -441,6 +447,7 @@ def _summary(data: pd.DataFrame) -> dict[str, str]:
         "reported_net",
         "check_variance",
         "detail_only_deductions",
+        "detail_only_owner_deductions",
     ):
         if column in data:
             totals[column.replace("_", " ")] = f"{data[column].fillna(0).sum():,.2f}"
@@ -565,8 +572,7 @@ def _price_chart(data: pd.DataFrame) -> tuple[str, str] | None:
         return None
     monthly = (
         data.assign(
-            total_unit_price=lambda frame: frame["average_unit_price"]
-            * frame["priced_line_count"]
+            total_unit_price=lambda frame: frame["average_unit_price"] * frame["priced_line_count"]
         )
         .groupby(["report_month", "product"], as_index=False)[
             ["total_unit_price", "priced_line_count"]

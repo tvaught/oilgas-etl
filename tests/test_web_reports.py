@@ -226,6 +226,142 @@ def test_owner_revenue_history_breaks_out_product_categories_and_properties(tmp_
     ].tolist() == ["Oil"]
 
 
+def test_owner_revenue_derived_gross_and_deductions_reconcile_to_payable_net(tmp_path) -> None:
+    database_path = tmp_path / "oilgas.duckdb"
+    pdf = tmp_path / "statement.pdf"
+    pdf.write_bytes(b"owner revenue")
+    database = Database(database_path)
+    database.initialize()
+    try:
+        statement = RevenueStatement(
+            operator="Test Operator",
+            owner_number="OWNER-1",
+            check_number="CHECK-1",
+            check_date=date(2026, 7, 1),
+            check_amount=Decimal("130.00"),
+            properties=[
+                RevenueProperty(
+                    property_code="P-1",
+                    property_name="Test Well",
+                    county="Test",
+                    state="TX",
+                    products=[
+                        RevenueProduct(
+                            product="OIL",
+                            lines=[
+                                RevenueLine(
+                                    line_type="WI SEV",
+                                    revenue_type="WI SEV",
+                                    production_period=date(2026, 6, 1),
+                                    owner_gross_value=Decimal("100.00"),
+                                    owner_deductions=Decimal("-10.00"),
+                                    owner_net_value=Decimal("90.00"),
+                                ),
+                                RevenueLine(
+                                    line_type="WORKING INTEREST",
+                                    revenue_type="WORKING INTEREST",
+                                    production_period=date(2026, 6, 1),
+                                    owner_net_value=Decimal("50.00"),
+                                ),
+                                RevenueLine(
+                                    line_type="TRANSPORTATION",
+                                    revenue_type="TRANSPORTATION",
+                                    production_period=date(2026, 6, 1),
+                                    owner_net_value=Decimal("-10.00"),
+                                ),
+                                RevenueLine(
+                                    line_type="TRN",
+                                    revenue_type="TRN",
+                                    production_period=date(2026, 6, 1),
+                                    owner_deductions=Decimal("-3.00"),
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        assert RevenueRepository(database.connection).insert(pdf, statement)
+    finally:
+        database.close()
+
+    row = ReportRepository(database_path).owner_revenue_history(ReportFilters()).iloc[0]
+
+    assert row["owner_gross_value"] == Decimal("150.00")
+    assert row["owner_deductions"] == Decimal("-20.00")
+    assert row["owner_net_value"] == Decimal("130.00")
+    assert row["owner_gross_value"] + row["owner_deductions"] == row["owner_net_value"]
+    assert row["detail_only_owner_deductions"] == Decimal("-3.00")
+
+
+def test_cashflow_excludes_jib_netting_property_but_owner_revenue_preserves_it(tmp_path) -> None:
+    database_path = tmp_path / "oilgas.duckdb"
+    pdf = tmp_path / "statement.pdf"
+    pdf.write_bytes(b"netting well")
+    database = Database(database_path)
+    database.initialize()
+    try:
+        statement = RevenueStatement(
+            operator="Test Operator",
+            owner_number="OWNER-1",
+            check_number="CHECK-1",
+            check_date=date(2026, 7, 1),
+            check_amount=Decimal("70.00"),
+            properties=[
+                RevenueProperty(
+                    property_code="P-1",
+                    property_name="Producing Well",
+                    county="Test",
+                    state="TX",
+                    products=[
+                        RevenueProduct(
+                            product="OIL",
+                            lines=[
+                                RevenueLine(
+                                    line_type="WORKING INTEREST",
+                                    revenue_type="WORKING INTEREST",
+                                    production_period=date(2026, 6, 1),
+                                    owner_net_value=Decimal("100.00"),
+                                )
+                            ],
+                        )
+                    ],
+                ),
+                RevenueProperty(
+                    property_code="10*JIBNET",
+                    property_name="JIB NETTING WELL",
+                    county="Test",
+                    state="TX",
+                    products=[
+                        RevenueProduct(
+                            product="JOINT INTEREST BILLING",
+                            lines=[
+                                RevenueLine(
+                                    line_type="WORKING INTEREST",
+                                    revenue_type="WORKING INTEREST",
+                                    production_period=date(2026, 6, 1),
+                                    owner_net_value=Decimal("-30.00"),
+                                )
+                            ],
+                        )
+                    ],
+                ),
+            ],
+        )
+        assert RevenueRepository(database.connection).insert(pdf, statement)
+    finally:
+        database.close()
+
+    repository = ReportRepository(database_path)
+    cashflow = repository.net_cashflow(ReportFilters())
+    owner_revenue = repository.owner_revenue_history(ReportFilters())
+
+    assert cashflow.iloc[0]["revenue_net"] == Decimal("100.00")
+    assert cashflow.iloc[0]["net_cashflow"] == Decimal("100.00")
+    assert owner_revenue["property_code"].tolist() == ["10*JIBNET", "P-1"]
+    assert owner_revenue["owner_net_value"].sum() == Decimal("70.00")
+
+
 def test_property_list_uses_latest_valid_ownership_decimals_and_flags_changes(tmp_path) -> None:
     database_path = tmp_path / "oilgas.duckdb"
     database = Database(database_path)

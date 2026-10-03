@@ -9,6 +9,8 @@ import pandas as pd
 
 from oilgas.web.filters import ReportFilters
 
+JIB_NETTING_PROPERTY_CODES = ("10*JIBNET",)
+
 
 @dataclass(frozen=True)
 class FilterOptions:
@@ -116,6 +118,10 @@ class ReportRepository:
         revenue_date = self._revenue_date(filters.revenue_date_basis)
         jib_date = self._jib_date(filters.jib_date_basis)
         revenue_where, revenue_params = self._revenue_filters(filters, revenue_date)
+        revenue_where += " AND p.property_code NOT IN ({})".format(
+            ", ".join("?" for _ in JIB_NETTING_PROPERTY_CODES)
+        )
+        revenue_params.extend(JIB_NETTING_PROPERTY_CODES)
         jib_where, jib_params = self._jib_filters(filters, jib_date)
         # The revenue and JIB branches are independent. A filter for one branch
         # suppresses unfiltered rows from the other; selecting both keeps both.
@@ -442,9 +448,30 @@ class ReportRepository:
                     ELSE rp.product
                 END AS product_category,
                 rp.product AS source_product,
-                SUM(rl.owner_gross_value) AS owner_gross_value,
-                SUM(rl.owner_deductions) AS owner_deductions,
-                SUM(rl.owner_net_value) AS owner_net_value
+                SUM(
+                    CASE
+                        WHEN rl.owner_net_value IS NULL THEN 0
+                        WHEN rl.owner_gross_value IS NOT NULL THEN rl.owner_gross_value
+                        WHEN rl.owner_net_value > 0 THEN rl.owner_net_value
+                        ELSE 0
+                    END
+                ) AS owner_gross_value,
+                SUM(COALESCE(rl.owner_net_value, 0))
+                    - SUM(
+                        CASE
+                            WHEN rl.owner_net_value IS NULL THEN 0
+                            WHEN rl.owner_gross_value IS NOT NULL THEN rl.owner_gross_value
+                            WHEN rl.owner_net_value > 0 THEN rl.owner_net_value
+                            ELSE 0
+                        END
+                    ) AS owner_deductions,
+                SUM(rl.owner_net_value) AS owner_net_value,
+                SUM(
+                    CASE
+                        WHEN rl.owner_net_value IS NULL THEN COALESCE(rl.owner_deductions, 0)
+                        ELSE 0
+                    END
+                ) AS detail_only_owner_deductions
             FROM revenue_line AS rl
             JOIN revenue_statement AS rs ON rs.statement_id = rl.statement_id
             JOIN operator AS o ON o.operator_id = rs.operator_id
