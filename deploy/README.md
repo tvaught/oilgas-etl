@@ -68,8 +68,9 @@ Sync the DuckDB database and matching raw source PDFs before starting the servic
 
 Sync new PDFs into the matching production raw archive first, then use the committed
 helper rather than calling `oilgas ingest` directly. It always targets the production
-DuckDB database, stops the web service to avoid a concurrent DuckDB writer, and restarts
-the service even if ingestion fails:
+DuckDB database, stops the web service to avoid a concurrent DuckDB writer, repairs raw
+archive permissions for the `oilgas` service account, and restarts the service even if
+ingestion fails:
 
 ```bash
 cd /srv/oilgas/app

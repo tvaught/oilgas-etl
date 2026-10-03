@@ -31,8 +31,15 @@ run() {
     "$@"
 }
 
+repair_archive_permissions() {
+    printf 'Repairing raw archive permissions for the oilgas service account.\n'
+    sudo chown -R travis:oilgas "$raw_data_dir"
+    sudo chmod -R g+rX "$raw_data_dir"
+}
+
 restart_service() {
     if "$service_stopped"; then
+        repair_archive_permissions
         printf 'Restarting oilgas service.\n'
         sudo systemctl start oilgas
     fi
